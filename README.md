@@ -37,6 +37,30 @@ LOCATIONCAT-style banner, colours, and interactive prompts:
 [?] ENTER REQUEST METHOD [GET/POST] [GET]:
 ```
 
+## Installation — compared with the famous tools (read from their READMEs)
+
+| Tool | Install steps | Needs |
+|---|---|---|
+| **sqlmap** | `git clone` — works out of the box | Python 2.7/3.x only, **zero deps** |
+| **nmap** | `sudo apt install nmap` / `brew install nmap` / Windows .exe (+Npcap) | system package, admin rights |
+| **Gobuster** | `go install ...@latest` or prebuilt binary | Go 1.24+ (or download binary) |
+| **Hydra** | `git clone`, `./configure`, `make`, `make install` + `apt-get install libssl-dev libssh-dev ...` | C compiler + system libraries — hardest |
+| **John** | compile from source (`./configure && make`) or binary distro | C compiler |
+| **Nikto** | `git clone`, `perl nikto.pl` (or Docker) | Perl |
+| **tplmap** | `pip install -r requirements.txt` (7 pinned deps) | **Python 2 — dead** |
+| **SSTImap** | `pip install -r requirements.txt` (5 deps) | Python 3 |
+| **GhostTrack** | `apt-get install git python3`, `git clone`, `pip3 install -r requirements.txt` | Python 3 + 2 deps |
+| **TraceRecon** | `git clone`, `pip install -r requirements.txt` (4 deps) | Python 3.8+ |
+| **SSTIProbe** | `git clone` + `python run.py setup` (auto venv + install) — or **nothing**: the probe runs on plain Python 3 (urllib fallback, sqlmap pattern) | Python 3.10+; flask only for the lab |
+
+Behaviour compared: sqlmap/nmap/Hydra/John/Nikto/Gobuster/tplmap are
+args-only (sqlmap adds `[Y/n]` prompts + `--batch`, Hydra has a separate
+`hydra-wizard`, Gobuster is mode-based, John keeps session files).
+GhostTrack/TraceRecon are menu-only. SSTImap has args + `-i` shell.
+**SSTIProbe has all three**: menu (default), args, and `[?]` prompts —
+plus `--batch` (sqlmap), `-q` (Gobuster), `--no-color`, `--level`,
+`--technique`, and `run.py doctor` to check the setup.
+
 Run it with no arguments and it opens the numbered menu, GhostTrack /
 TraceRecon style (`python run.py probe` or `--menu`):
 ```
@@ -84,9 +108,16 @@ Flags (see `python run.py probe --help`):
 -i, --interactive   open the menu (SSTImap -i style)
 --level {0,1,5}     context depth (tplmap style, default 1)
 --technique {R,T,RT} render / boolean blind / both (default RT)
+--batch             never ask, use defaults (sqlmap --batch style)
+-q, --quiet         only verdict + report path (Gobuster -q style)
 --version           print SSTIProbe version and exit
 --no-color          disable coloured output (sqlmap --disable-coloring style)
 --url / --param / --method / --json / --output / --timeout
+```
+
+Setup check:
+```
+python run.py doctor     # Python version, venv, requests, flask, lab on :5000
 ```
 
 Lab endpoints (`python run.py lab`, http://127.0.0.1:5000):

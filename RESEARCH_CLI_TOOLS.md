@@ -244,6 +244,88 @@ class Jinja2(python.Python): priority = 5
 # plugin.py, matcher.py, interactive.py; utils/ has rand.py, closures.py.
 ```
 
+## Installation & behaviour — compared (READMEs read 2026-11-25)
+
+### Installation (steps counted from each tool's README / INSTALL doc)
+- **sqlmap** — README "Installation": `git clone --depth 1
+  https://github.com/sqlmapproject/sqlmap.git sqlmap-dev`, then
+  "sqlmap works out of the box with Python 2.7 and 3.x on any platform."
+  No install command, no dependencies. Easiest of all.
+- **nmap** — `sudo apt install nmap` / `sudo dnf install nmap` /
+  `sudo pacman -S nmap` / `brew install nmap` / Windows self-installer
+  from nmap.org (bundles Npcap). One command, but needs admin rights,
+  and Windows needs the Npcap driver.
+- **Gobuster** — README: `go install github.com/OJ/gobuster/v3@latest`
+  ("Requirements: Go 1.24 or higher"), or pre-compiled binaries from the
+  releases page, or `git clone` + build. Easy if Go is already installed.
+- **Hydra** — README: `git clone`, then `./configure`, `make`,
+  `make install`; Ubuntu/Debian first needs
+  `apt-get install libssl-dev libssh-dev libidn11-dev libpcre3-dev ...`,
+  macOS needs a cmake flag and must NOT install libssh via Homebrew.
+  Hardest install in the set.
+- **John the Ripper** — `doc/INSTALL`: compile the source
+  (`./configure && make` in `src/`), or get a binary distribution;
+  "most likely you do not need to install system-wide... enter the
+  run directory and invoke John from there."
+- **Nikto** — `git clone`, then `perl nikto.pl` (Perl required), or
+  `docker pull ghcr.io/sullo/nikto:latest` / `docker build`.
+- **tplmap** — `requirements.txt`: PyYAML, certifi, chardet, idna,
+  requests 2.22, urllib3, wsgiref (7 pinned deps) + Python 2, which is
+  dead. Hardest Python install (old interpreter + pinned old deps).
+- **SSTImap** — `requirements.txt`: argparse, requests, urllib3,
+  mechanize, html5lib (5 deps); run as `./sstimap.py -u <url>`.
+- **GhostTrack** — README: `sudo apt-get install git`, `sudo apt-get
+  install python3`, `git clone`, `pip3 install -r requirements.txt`
+  (requests, phonenumbers), `python3 GhostTR.py`.
+- **TraceRecon** — README "Installation": Python 3.8+, `git clone`,
+  `pip install -r requirements.txt` (requests, phonenumbers, dnspython,
+  python-whois), `python tracerecon.py`.
+- **SSTIProbe** — `git clone` + `python run.py setup` (auto venv +
+  install, one command, works on Windows/macOS/Linux), or NOTHING for
+  the probe: plain Python 3 runs it (urllib fallback). Only the lab
+  needs flask.
+
+### Behaviour (how they act when you run them)
+- **sqlmap**: args-only + inline `[Y/n]` prompts (capital = default) +
+  `--batch` (never ask) + `--disable-coloring` + session files + JSON report.
+- **nmap**: args-only, no prompts at all; single-key runtime controls
+  (`v` verbosity, `d` debug, `p` status); `-oN/-oX/-oG/-oA` outputs.
+- **Hydra**: args-only main binary; separate `hydra-wizard` asks
+  sequential questions; `-o` output, `hydra.restore` session file.
+- **John**: args-only; session in `john.rec`, results in `john.pot`,
+  log in `john.log`; `--show` / `--restore`; press `q` to abort.
+- **Nikto**: args-only; `-output` + `-Format` (csv/json/htm/txt/xml);
+  one (y/n) update prompt; `-nointeractive`.
+- **Gobuster**: mode-based args (`dir dns vhost ...`); `-q` quiet;
+  `--no-color`; `-o` plain-text output.
+- **tplmap**: args-only; `-u/-d/-L`; `--level` (context depth),
+  `--technique` (render/error); `[+]` markers only.
+- **SSTImap**: args + `-i` interactive shell (`url`/`run`/`help`
+  commands); `--no-color`; `--save-vuln`.
+- **GhostTrack**: menu-only, no args at all; numbered menu + `@Ghost~#`
+  prompt; `Press enter to continue` loop.
+- **TraceRecon**: menu + `[?]` prompts + `Export results? [y/N]` →
+  timestamped JSON+TXT in `output/`.
+- **SSTIProbe**: all three — menu (default, GhostTrack/TraceRecon),
+  args (sqlmap/nmap style), `[?]` prompts (LOCATIONCAT style) —
+  plus `--batch` (sqlmap), `-q` (Gobuster), `--no-color`,
+  `--level`/`--technique` (tplmap), menu lab-status check, and
+  `run.py doctor` (setup check).
+
+## What was applied to SSTIProbe v2.4 (within the PDF)
+1. Zero-dependency probe: `requests` preferred, `urllib` (stdlib)
+   fallback — plain Python 3 runs the probe, like sqlmap.
+2. `--batch`: never ask, use defaults (sqlmap pattern).
+3. `-q` / `--quiet`: only verdict + report path (Gobuster pattern).
+4. Menu option 5: lab status check + how to start the lab.
+5. `python run.py doctor`: Python version, venv, requests, flask,
+   lab on :5000 — with the fix for each `[!]` line.
+6. `python run.py probe` with no args now opens the menu (before, it
+   printed an example and exited — the menu was unreachable that way).
+7. `run.py lab` now replaces itself with the lab process (`os.execv`)
+   instead of spawning it as a child — stopping the launcher no longer
+   leaves a stale lab process running in the background.
+
 ## What was applied to SSTIProbe v2.3 (within the PDF)
 1. Random-pair confirm (`randint_n`, 1-digit starts at 2) — tplmap rand.
 2. Header/trailer wrapped confirm with random 10-digit markers.

@@ -30,6 +30,13 @@ THE 6 MUST-HAVE FEATURES (PDF) — all in this file:
   6. Report saved to a file: parameter, evidence, remediation note
      -> build_report() + main() writes the file
 
+INSTALL — the probe needs NOTHING installed (sqlmap pattern):
+  plain Python 3 is enough: it uses requests when installed, otherwise
+  the standard library (urllib). Only the LAB needs flask:
+    python run.py setup        # venv + requests + flask, first time only
+  Or skip setup entirely for the probe:
+    python3 sstiprobe.py --url http://127.0.0.1:5000/vuln --param name
+
 USAGE — three ways, same tool:
   Menu (GhostTrack / TraceRecon style — default when run with no args):
     python run.py probe
@@ -38,6 +45,7 @@ USAGE — three ways, same tool:
       [ 2] Quick scan: vulnerable lab  /vuln
       [ 3] Quick scan: safe lab  /safe
       [ 4] Run Step 3 test (evaluation check)
+      [ 5] Check lab status (is the lab running?)
       [ 0] Exit
       [ ? ] Select option :
 
@@ -54,6 +62,8 @@ USAGE — three ways, same tool:
     python run.py probe --url http://127.0.0.1:5000/safe  --param name --output report.txt
     python run.py probe --version
     python run.py probe --url http://127.0.0.1:5000/vuln --param name --no-color
+    python run.py probe --batch    # never ask, use defaults (sqlmap style)
+    python run.py probe --url http://127.0.0.1:5000/vuln --param name -q  # quiet
 """
 
 import argparse
@@ -63,9 +73,20 @@ import sys
 import time
 from datetime import datetime
 
-import requests
+# Zero-dependency probe (sqlmap pattern: it works out of the box, no
+# install step, because it uses only the Python standard library).
+# requests is preferred when installed; otherwise we fall back to
+# urllib (stdlib). Only the LAB needs flask (pip install via run.py).
+try:
+    import requests
 
-VERSION = "2.3"
+    HAVE_REQUESTS = True
+except ImportError:  # noqa: BLE001 - requests simply is not installed
+    requests = None  # type: ignore[assignment]
+    HAVE_REQUESTS = False
+
+VERSION = "2.4"
+QUIET = False
 
 # --- Colours (ANSI: works on Kali/macOS/Windows 10+ terminals) ----------
 # colorama is used if installed (it fixes colours on older Windows cmd);
@@ -280,6 +301,8 @@ def print_banner():
     """Startup sequence (research consensus): banner, version, author,
     legal disclaimer — like SSTImap / sqlmap."""
     global _BANNER_SHOWN
+    if QUIET:
+        return
     if _BANNER_SHOWN:
         return
     _BANNER_SHOWN = True
@@ -305,21 +328,60 @@ def print_banner():
 # "the page already looked like that".
 # ---------------------------------------------------------------------------
 def send_request(url, param, value, method, use_json, timeout=10):
-    """Send one request with `value` in `param`. Returns response text."""
+    """Send one request with `value` in `param`. Returns response text.
+    With requests installed it uses requests; without it, plain urllib
+    from the standard library — so the probe runs with zero installs."""
+    if HAVE_REQUESTS:
+        if method == "POST":
+            if use_json:
+                resp = requests.post(url, json={param: value}, timeout=timeout)
+            else:
+                resp = requests.post(url, data={param: value}, timeout=timeout)
+        else:  # GET
+            resp = requests.get(url, params={param: value}, timeout=timeout)
+        return resp.text
+    # --- urllib fallback (stdlib only) -------------------------------------
+    import json as _json
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
     if method == "POST":
         if use_json:
-            resp = requests.post(url, json={param: value}, timeout=timeout)
+            data = _json.dumps({param: value}).encode()
+            req = urllib.request.Request(
+                url, data=data,
+                headers={"Content-Type": "application/json"}, method="POST")
         else:
-            resp = requests.post(url, data={param: value}, timeout=timeout)
-    else:  # GET
-        resp = requests.get(url, params={param: value}, timeout=timeout)
-    return resp.text
+            data = urllib.parse.urlencode({param: value}).encode()
+            req = urllib.request.Request(url, data=data, method="POST")
+    else:
+        sep_char = "&" if "?" in url else "?"
+        req = urllib.request.Request(
+            url + sep_char + urllib.parse.urlencode({param: value}))
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:  # e.g. 500 template error page
+        return exc.read().decode("utf-8", errors="replace")
+
+
+def lab_is_running(timeout=3):
+    """Quick check: is the lab answering on 127.0.0.1:5000? (stdlib only)"""
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:5000/", timeout=timeout) as resp:
+            return resp.status == 200
+    except Exception:  # noqa: BLE001 - any failure means "not running"
+        return False
 
 
 def fetch_baseline(url, param, method, use_json, timeout=10):
     """Baseline = response to a harmless value ('SSTIProbeBaseline')."""
     body = send_request(url, param, "SSTIProbeBaseline", method, use_json, timeout)
-    print(f"{CYAN}[1] BASELINE:{RESET} {len(body)} characters  ->  {body[:120]!r}")
+    if not QUIET:
+        print(f"{CYAN}[1] BASELINE:{RESET} {len(body)} characters  ->  {body[:120]!r}")
     return body
 
 
@@ -392,8 +454,9 @@ def check_blind(url, param, baseline, method, use_json, timeout=10):
 def probe(url, param, baseline, method, use_json, timeout=10, level=1, technique="RT"):
     """Run all families in all contexts up to --level. Returns findings."""
     findings = []
-    print(f"{CYAN}[2] DETECTION:{RESET} {len(PAYLOADS)} syntax families, "
-          f"contexts up to level {level} (tplmap pattern)")
+    if not QUIET:
+        print(f"{CYAN}[2] DETECTION:{RESET} {len(PAYLOADS)} syntax families, "
+              f"contexts up to level {level} (tplmap pattern)")
     for fam in PAYLOADS:
         family = fam["family"]
         a, b, result = fam["test"]
@@ -412,7 +475,8 @@ def probe(url, param, baseline, method, use_json, timeout=10, level=1, technique
                 colour, mark = YELLOW, "[-]"
             else:
                 colour, mark = "", "[ ]"
-            print(f"  {colour}{mark} [{family}] [{ctx['name']}] {payload} = {result} -> {verdict}{RESET}")
+            if not QUIET:
+                print(f"  {colour}{mark} [{family}] [{ctx['name']}] {payload} = {result} -> {verdict}{RESET}")
             if verdict == "evaluated":
                 hit = {"ctx": ctx, "payload": payload, "body": body}
                 break
@@ -424,9 +488,11 @@ def probe(url, param, baseline, method, use_json, timeout=10, level=1, technique
         confirm_payload = wrap_context(build_payload(fam, c, d), hit["ctx"])
         confirm_body = send_request(url, param, confirm_payload, method, use_json, timeout)
         confirm_verdict = check_evaluation(baseline, confirm_body, confirm_payload, confirm_result)
-        print(f"      {CYAN}[3] CONFIRM:{RESET} {confirm_payload} = {confirm_result} -> {confirm_verdict}")
+        if not QUIET:
+            print(f"      {CYAN}[3] CONFIRM:{RESET} {confirm_payload} = {confirm_result} -> {confirm_verdict}")
         if confirm_verdict != "evaluated":
-            print("      Not confirmed — skipping (could be a false positive).")
+            if not QUIET:
+                print("      Not confirmed — skipping (could be a false positive).")
             continue
 
         # [3a] Random-pair confirm (tplmap rand pattern): fresh random
@@ -435,9 +501,11 @@ def probe(url, param, baseline, method, use_json, timeout=10, level=1, technique
         rand_payload = wrap_context(build_payload(fam, ra, rb), hit["ctx"])
         rand_body = send_request(url, param, rand_payload, method, use_json, timeout)
         rand_verdict = check_evaluation(baseline, rand_body, rand_payload, ra * rb)
-        print(f"      {CYAN}[3a] RANDOM CONFIRM:{RESET} {rand_payload} = {ra * rb} -> {rand_verdict}")
+        if not QUIET:
+            print(f"      {CYAN}[3a] RANDOM CONFIRM:{RESET} {rand_payload} = {ra * rb} -> {rand_verdict}")
         if rand_verdict != "evaluated":
-            print("      Random confirm failed — skipping (could be a false positive).")
+            if not QUIET:
+                print("      Random confirm failed — skipping (could be a false positive).")
             continue
 
         # [3b] Header/trailer wrapped confirm (tplmap _detect_render):
@@ -447,16 +515,19 @@ def probe(url, param, baseline, method, use_json, timeout=10, level=1, technique
             wrapped_payload = wrap_context(wrapped_payload, hit["ctx"])
             wrapped_body = send_request(url, param, wrapped_payload, method, use_json, timeout)
             wrapped_ok = wrapped_expected in wrapped_body and wrapped_expected not in baseline
-            print(f"      {CYAN}[3b] WRAPPED CONFIRM:{RESET} header+{a}*{b}+trailer -> "
-                  f"{'evaluated' if wrapped_ok else 'not confirmed'}")
+            if not QUIET:
+                print(f"      {CYAN}[3b] WRAPPED CONFIRM:{RESET} header+{a}*{b}+trailer -> "
+                      f"{'evaluated' if wrapped_ok else 'not confirmed'}")
             if not wrapped_ok:
-                print("      Wrapped confirm failed — skipping (could be a false positive).")
+                if not QUIET:
+                    print("      Wrapped confirm failed — skipping (could be a false positive).")
                 continue
 
         engine = fingerprint_engine(url, param, fam.get("start", ""), fam.get("end", ""), method, use_json, timeout)
         if engine.startswith("Unknown"):
             engine = f"Likely {fam['engine']} (family guess — fingerprint inconclusive)"
-        print(f"      {CYAN}[4] ENGINE:{RESET} {engine}")
+        if not QUIET:
+            print(f"      {CYAN}[4] ENGINE:{RESET} {engine}")
         findings.append({
             "family": family,
             "payload": hit["payload"],
@@ -471,12 +542,14 @@ def probe(url, param, baseline, method, use_json, timeout=10, level=1, technique
 
     # Blind technique (tplmap 'T'): only if render found nothing.
     if not findings and "T" in technique:
-        print(f"{CYAN}[2b] BLIND:{RESET} render found nothing — trying boolean blind (true vs false)")
+        if not QUIET:
+            print(f"{CYAN}[2b] BLIND:{RESET} render found nothing — trying boolean blind (true vs false)")
         blind = check_blind(url, param, baseline, method, use_json, timeout)
         if blind:
-            print(f"  {RED}[!] [boolean blind] 7*7==49 vs 7*7==50 -> responses differ -> evaluated{RESET}")
+            if not QUIET:
+                print(f"  {RED}[!] [boolean blind] 7*7==49 vs 7*7==50 -> responses differ -> evaluated{RESET}")
             findings.append(blind)
-        else:
+        elif not QUIET:
             print("  [ ] [boolean blind] responses identical — no blind evaluation")
     return findings
 
@@ -561,6 +634,10 @@ def parse_args(argv=None):
                         help="Context depth, tplmap style: 0=text only, 1=+code tags (default), 5=+comment blocks")
     parser.add_argument("--technique", default="RT", choices=["R", "T", "RT"],
                         help="Technique, tplmap style: R=render, T=boolean blind, RT=both (default)")
+    parser.add_argument("--batch", action="store_true",
+                        help="Never ask anything; use defaults (sqlmap --batch pattern)")
+    parser.add_argument("-q", "--quiet", action="store_true",
+                        help="Quiet mode: only the verdict + report path (Gobuster -q pattern)")
     parser.add_argument("--no-color", action="store_true",
                         help="Disable coloured output (like sqlmap --disable-coloring)")
     parser.add_argument("--version", action="version",
@@ -569,6 +646,8 @@ def parse_args(argv=None):
 
     if args.no_color:
         disable_colours()
+    global QUIET
+    QUIET = args.quiet
     return args
 
 
@@ -586,8 +665,23 @@ MENU_OPTIONS = [
     (2, "Quick scan: vulnerable lab  /vuln", "vuln"),
     (3, "Quick scan: safe lab  /safe", "safe"),
     (4, "Run Step 3 test (evaluation check)", "test"),
+    (5, "Check lab status (is the lab running?)", "lab"),
     (0, "Exit", None),
 ]
+
+
+def lab_status():
+    """Menu option 5: is the lab answering? Tell the user how to start it."""
+    header("LAB STATUS")
+    if lab_is_running():
+        ok("Lab is running at http://127.0.0.1:5000")
+        info("Endpoints", "/vuln  /vuln-dollar  /safe  /blind")
+    else:
+        err("Lab is NOT running.")
+        print("  Start it in a SECOND terminal:")
+        print("    python run.py lab")
+        print("  Then come back here and pick option 1, 2 or 3.")
+    return 0
 
 
 def show_menu():
@@ -628,27 +722,29 @@ def run_step3_test():
 
 def do_scan(args):
     """One full scan: config block, baseline, detection, report."""
-    header("SCAN")
-    # Gobuster-style config block, now as aligned info() fields (TraceRecon).
-    info("Target", args.url)
-    info("Parameter", args.param)
-    info("Method", args.method)
-    info("Level", args.level)
-    info("Technique", args.technique)
-    info("Output", args.output)
-    sep()
+    if not QUIET:
+        header("SCAN")
+        # Gobuster-style config block, now as aligned info() fields (TraceRecon).
+        info("Target", args.url)
+        info("Parameter", args.param)
+        info("Method", args.method)
+        info("Level", args.level)
+        info("Technique", args.technique)
+        info("Output", args.output)
+        sep()
     try:
-        warn("Querying target …")
+        if not QUIET:
+            warn("Querying target …")
         baseline = fetch_baseline(args.url, args.param, args.method, args.json, args.timeout)
         findings = probe(args.url, args.param, baseline, args.method, args.json,
                          args.timeout, level=args.level, technique=args.technique)
-    except requests.exceptions.Timeout:
-        err("Request timed out. Is the lab app running?  python run.py lab")
-        return 1
-    except requests.exceptions.ConnectionError:
-        err(f"Could not connect to {args.url}. Is the lab app running?  python run.py lab")
-        return 1
-    except requests.RequestException as exc:
+    except Exception as exc:  # noqa: BLE001 - typed below when requests exists
+        if HAVE_REQUESTS and isinstance(exc, requests.exceptions.Timeout):
+            err("Request timed out. Is the lab app running?  python run.py lab")
+            return 1
+        if HAVE_REQUESTS and isinstance(exc, requests.exceptions.ConnectionError):
+            err(f"Could not connect to {args.url}. Is the lab app running?  python run.py lab")
+            return 1
         err(f"Could not reach the lab app: {exc}")
         print("Is lab_app.py running?  python run.py lab")
         return 1
@@ -659,7 +755,9 @@ def do_scan(args):
         print(f"{RED}{BOLD}[!] VULNERABLE — template injection found in parameter '{args.param}'{RESET}")
     else:
         print(f"{GREEN}{BOLD}[+] NOT VULNERABLE — no template evaluation detected{RESET}")
-    print(report)
+    # Quiet mode (-q): only verdict + report path, no full report on screen.
+    if not QUIET:
+        print(report)
     with open(args.output, "w", encoding="utf-8") as fh:
         fh.write(report)
     ok(f"REPORT SAVED TO: {args.output}")
@@ -690,12 +788,14 @@ def menu_loop(args):
                 do_scan(args)
             elif choice == "4":
                 run_step3_test()
+            elif choice == "5":
+                lab_status()
             else:
-                err("Please input a number from the menu (0-4).")
+                err("Please input a number from the menu (0-5).")
                 time.sleep(1)
                 continue
         except ValueError:
-            err("Please input a number from the menu (0-4).")
+            err("Please input a number from the menu (0-5).")
             time.sleep(1)
             continue
         except KeyboardInterrupt:
@@ -709,6 +809,13 @@ def menu_loop(args):
 def main(argv=None):
     args = parse_args(argv)
     try:
+        # --batch (sqlmap pattern): never ask, never show the menu —
+        # missing values become the defaults and the scan runs straight away.
+        # --quiet implies the same (a scripted run has nothing to ask).
+        if args.batch or args.quiet:
+            args.url = args.url or "http://127.0.0.1:5000/vuln"
+            args.param = args.param or "name"
+            return do_scan(args)
         # Menu mode: --menu / -i, or no arguments at all (like GhostTrack,
         # which has no args — it always opens its menu).
         if args.menu or args.interactive or (not args.url and not args.param):
