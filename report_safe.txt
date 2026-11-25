@@ -1,0 +1,10 @@
+SSTIProbe Report
+Date: 2026-11-25 14:08:01
+Target URL: http://127.0.0.1:5000/safe
+Parameter: name
+Method: GET
+
+Result: NOT VULNERABLE (no template evaluation detected)
+No payload was evaluated. This does not prove the app is
+safe in every way — only that these 4 families did not
+evaluate arithmetic in this parameter.

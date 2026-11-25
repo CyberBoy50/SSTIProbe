@@ -1,0 +1,16 @@
+SSTIProbe Report
+Date: 2026-11-25 14:04:51
+Target URL: http://127.0.0.1:5000/vuln
+Parameter: name
+Method: GET
+
+Result: VULNERABLE — 1 syntax family/families evaluated input
+
+Vulnerable parameter: name
+Syntax family: double-brace {{ }}
+Engine: Jinja2 (Python string-repeat marker 7*'7' = 7777777)
+Detection payload: {{7*7}}  -> computed 49
+Confirmation payload: {{7*8}}  -> computed 56
+Evidence (response snippet): 'Hello 49!'
+
+Remediation: Never render user input as a template. Pass it as a VARIABLE (e.g. render_template_string('Hello {{ name }}!', name=user_input)) so the engine prints it instead of evaluating it. If a template must be built from input, use a sandboxed engine and an allow-list of safe values.
