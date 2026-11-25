@@ -30,10 +30,19 @@ THE 6 MUST-HAVE FEATURES (PDF) — all in this file:
   6. Report saved to a file: parameter, evidence, remediation note
      -> build_report() + main() writes the file
 
-USAGE — two ways, same tool:
-  Interactive (like LOCATIONCAT — it asks you):
+USAGE — three ways, same tool:
+  Menu (GhostTrack / TraceRecon style — default when run with no args):
     python run.py probe
-    python run.py probe -i        # explicit interactive mode (SSTImap style)
+    python run.py probe --menu
+      [ 1] Scan a target (enter URL, parameter, method)
+      [ 2] Quick scan: vulnerable lab  /vuln
+      [ 3] Quick scan: safe lab  /safe
+      [ 4] Run Step 3 test (evaluation check)
+      [ 0] Exit
+      [ ? ] Select option :
+
+  Interactive prompts (option 1 in the menu asks the same questions):
+    python run.py probe -i        # opens the menu (SSTImap -i style)
       [?] ENTER TARGET URL: http://127.0.0.1:5000/vuln
       [?] ENTER PARAMETER NAME: name
       [?] ENTER REQUEST METHOD [GET/POST]: GET
@@ -48,12 +57,14 @@ USAGE — two ways, same tool:
 """
 
 import argparse
+import os
 import sys
+import time
 from datetime import datetime
 
 import requests
 
-VERSION = "2.1"
+VERSION = "2.2"
 
 # --- Colours (ANSI: works on Kali/macOS/Windows 10+ terminals) ----------
 # colorama is used if installed (it fixes colours on older Windows cmd);
@@ -65,12 +76,69 @@ try:
 except Exception:  # noqa: BLE001 - colour is cosmetic, never fatal
     pass
 
-RED = "\033[91m"
-GREEN = "\033[92m"
-YELLOW = "\033[93m"
-CYAN = "\033[96m"
-BOLD = "\033[1m"
-RESET = "\033[0m"
+# --- Colours, TraceRecon style: one class, short names ------------------
+# GhostTrack does the same with plain variables:
+#   Bl='\033[30m' Re='\033[1;31m' Gr='\033[1;32m' Ye='\033[1;33m'
+#   Blu='\033[1;34m' Mage='\033[1;35m' Cy='\033[1;36m' Wh='\033[1;37m'
+# TraceRecon puts them in a class C (RST/BLD/RED/GRN/YEL/BLU/MAG/CYN/WHT).
+class C:
+    RST = "\033[0m"
+    BLD = "\033[1m"
+    DIM = "\033[2m"
+    RED = "\033[1;31m"
+    GRN = "\033[1;32m"
+    YEL = "\033[1;33m"
+    BLU = "\033[1;34m"
+    MAG = "\033[1;35m"
+    CYN = "\033[1;36m"
+    WHT = "\033[1;37m"
+
+
+RED = C.RED
+GREEN = C.GRN
+YELLOW = C.YEL
+CYAN = C.CYN
+BOLD = C.BLD
+RESET = C.RST
+
+
+def clear():
+    """Clear the screen — GhostTrack / TraceRecon pattern.
+    Windows: cls, macOS/Linux: clear."""
+    os.system("cls" if os.name == "nt" else "clear")
+
+
+def sep(color=C.GRN, char="─", width=58):
+    """A rule line, TraceRecon style: sep(C.GRN, '─') / sep(C.GRN, '═')."""
+    print(f"{color}{char * width}{C.RST}")
+
+
+def header(title, color=C.GRN):
+    """A titled section header with rule lines above and below."""
+    sep(color)
+    print(f"{color} {title}{C.RST}")
+    sep(color)
+
+
+def ok(msg):
+    """[+] success line: ' [+] message' — white brackets, green plus."""
+    print(f" {C.WHT}[{C.GRN}+{C.WHT}]{C.RST} {msg}")
+
+
+def warn(msg):
+    """[!] warning line, yellow."""
+    print(f" {C.WHT}[{C.YEL}!{C.WHT}]{C.RST} {C.YEL}{msg}{C.RST}")
+
+
+def err(msg):
+    """[✗] error line, red."""
+    print(f" {C.WHT}[{C.RED}x{C.WHT}]{C.RST} {C.RED}{msg}{C.RST}")
+
+
+def info(label, value, label_color=C.WHT, val_color=C.GRN):
+    """One aligned field — TraceRecon style:
+    ' Target URL            : http://...' (label 22 chars, white; value green)."""
+    print(f" {label_color}{label:<22}{C.RST}: {val_color}{value}{C.RST}")
 
 BANNER = r"""
   ____  ____  _____ ___ ____  ____   ___  ____  _____
@@ -115,6 +183,8 @@ def disable_colours():
     """Turn all colours off (--no-color, like sqlmap / SSTImap / Gobuster)."""
     global RED, GREEN, YELLOW, CYAN, BOLD, RESET
     RED = GREEN = YELLOW = CYAN = BOLD = RESET = ""
+    for attr in ("RST", "BLD", "DIM", "RED", "GRN", "YEL", "BLU", "MAG", "CYN", "WHT"):
+        setattr(C, attr, "")
 
 
 def print_banner():
@@ -131,7 +201,13 @@ def print_banner():
         "[!] LEGAL DISCLAIMER: Lab only — only test systems you own "
         "or have written permission to test."
     )
-    print("=" * 50)
+    # TraceRecon-style box under the banner.
+    print(f"{C.GRN}")
+    print("┌──────────────────────────────────────────────────┐")
+    print(f"│ SSTI Detector v{VERSION} — detection only        │")
+    print("│ For authorized lab use only                      │")
+    print("└──────────────────────────────────────────────────┘")
+    print(f"{C.RST}", end="")
 
 
 # ---------------------------------------------------------------------------
@@ -307,7 +383,9 @@ def parse_args(argv=None):
                         help="Report file to save (default: sstiprobe_report.txt)")
     parser.add_argument("--timeout", type=int, default=10, help="Request timeout in seconds")
     parser.add_argument("-i", "--interactive", action="store_true",
-                        help="Interactive mode: ask for URL, parameter and method (like SSTImap -i)")
+                        help="Interactive mode: show the menu (like SSTImap -i)")
+    parser.add_argument("--menu", action="store_true",
+                        help="Show the numbered menu (GhostTrack / TraceRecon style)")
     parser.add_argument("--no-color", action="store_true",
                         help="Disable coloured output (like sqlmap --disable-coloring)")
     parser.add_argument("--version", action="version",
@@ -316,35 +394,84 @@ def parse_args(argv=None):
 
     if args.no_color:
         disable_colours()
-
-    # Interactive mode: with -i, or when URL / parameter were NOT given
-    # as arguments. With --url + --param given and no -i, nothing is
-    # ever asked — the tool runs straight away (script / demo mode).
-    # Args already given become the defaults shown in the prompts.
-    if args.interactive or not args.url or not args.param:
-        print_banner()
-        args.url = ask_interactive("ENTER TARGET URL", args.url or "http://127.0.0.1:5000/vuln")
-        args.param = ask_interactive("ENTER PARAMETER NAME", args.param or "name")
-        method = ask_interactive("ENTER REQUEST METHOD [GET/POST]", args.method).upper()
-        args.method = method if method in ("GET", "POST") else "GET"
     return args
 
 
-def main(argv=None):
-    args = parse_args(argv)
-    # Banner was already shown in interactive mode; show it in args mode too.
+# ---------------------------------------------------------------------------
+# MENU MODE — GhostTrack / TraceRecon pattern, adapted to SSTIProbe.
+# GhostTrack keeps a list of options as dicts {num, text, func} and builds
+# the menu text with option_text(); TraceRecon keeps tuples
+# (num, label, key, colour) and show_menu() prints "[ 1] Label" bullets
+# between '═' rule lines, then asks "[ ? ] Select option : ".
+# After each option GhostTrack does: input("Press enter to continue")
+# and loops back to main(); Ctrl+C prints "[ ! ] Exit".
+# ---------------------------------------------------------------------------
+MENU_OPTIONS = [
+    (1, "Scan a target (enter URL, parameter, method)", "scan"),
+    (2, "Quick scan: vulnerable lab  /vuln", "vuln"),
+    (3, "Quick scan: safe lab  /safe", "safe"),
+    (4, "Run Step 3 test (evaluation check)", "test"),
+    (0, "Exit", None),
+]
+
+
+def show_menu():
+    """Clear screen, banner, then the numbered menu."""
+    clear()
     print_banner()
-    # Gobuster-style config block: the whole job at a glance.
-    print(f"{GREEN}[+] Target    :{RESET} {args.url}")
-    print(f"{GREEN}[+] Parameter :{RESET} {args.param}")
-    print(f"{GREEN}[+] Method    :{RESET} {args.method}")
-    print(f"{GREEN}[+] Output    :{RESET} {args.output}")
-    print("-" * 50)
+    sep(C.GRN, "═")
+    for num, label, _key in MENU_OPTIONS:
+        print(f" {C.GRN}[{C.WHT}{num:>2}{C.GRN}]{C.RST} {C.WHT}{label}{C.RST}")
+    sep(C.GRN, "═")
+
+
+def run_step3_test():
+    """Step 3 test, run from the menu: the same 3 cases as test_evaluation.py."""
+    header("STEP 3 TEST — evaluation check")
+    baseline = "Hello SSTIProbeBaseline!"
+    payload = "{{7*7}}"
+    cases = [
+        ("evaluated", "Hello 49!", "evaluated"),
+        ("reflected", "Hello {{7*7}}!", "reflected"),
+        ("no-change", "Hello Guest!", "no-change"),
+    ]
+    passed = 0
+    for name, body, want in cases:
+        got = check_evaluation(baseline, body, payload, 49)
+        status = "PASS" if got == want else "FAIL"
+        if got == want:
+            passed += 1
+            ok(f"{status}: {name:<10} -> got '{got}', expected '{want}'")
+        else:
+            err(f"{status}: {name:<10} -> got '{got}', expected '{want}'")
+    if passed == len(cases):
+        ok(f"All {passed} Step-3 tests passed.")
+    else:
+        err(f"{passed}/{len(cases)} Step-3 tests passed.")
+    return 0
+
+
+def do_scan(args):
+    """One full scan: config block, baseline, detection, report."""
+    header("SCAN")
+    # Gobuster-style config block, now as aligned info() fields (TraceRecon).
+    info("Target", args.url)
+    info("Parameter", args.param)
+    info("Method", args.method)
+    info("Output", args.output)
+    sep()
     try:
+        warn("Querying target …")
         baseline = fetch_baseline(args.url, args.param, args.method, args.json, args.timeout)
         findings = probe(args.url, args.param, baseline, args.method, args.json, args.timeout)
+    except requests.exceptions.Timeout:
+        err("Request timed out. Is the lab app running?  python run.py lab")
+        return 1
+    except requests.exceptions.ConnectionError:
+        err(f"Could not connect to {args.url}. Is the lab app running?  python run.py lab")
+        return 1
     except requests.RequestException as exc:
-        print(f"{RED}[!] ERROR: could not reach the lab app: {exc}{RESET}")
+        err(f"Could not reach the lab app: {exc}")
         print("Is lab_app.py running?  python run.py lab")
         return 1
 
@@ -357,8 +484,67 @@ def main(argv=None):
     print(report)
     with open(args.output, "w", encoding="utf-8") as fh:
         fh.write(report)
-    print(f"{CYAN}[5] REPORT SAVED TO:{RESET} {args.output}")
+    ok(f"REPORT SAVED TO: {args.output}")
     return 0
+
+
+def menu_loop(args):
+    """Numbered menu loop. Returns 0 on clean exit."""
+    while True:
+        show_menu()
+        try:
+            choice = input(f"{C.WHT}\n [ ? ] {C.GRN}Select option{C.WHT} : {C.GRN}").strip()
+            print(C.RST, end="")
+            if choice == "0":
+                print(f"\n{C.WHT}[ {C.RED}! {C.WHT}] {C.RED}Exit{C.RST}")
+                return 0
+            if choice == "1":
+                args.url = ask_interactive("ENTER TARGET URL", args.url or "http://127.0.0.1:5000/vuln")
+                args.param = ask_interactive("ENTER PARAMETER NAME", args.param or "name")
+                method = ask_interactive("ENTER REQUEST METHOD [GET/POST]", args.method).upper()
+                args.method = method if method in ("GET", "POST") else "GET"
+                do_scan(args)
+            elif choice == "2":
+                args.url, args.param, args.method = "http://127.0.0.1:5000/vuln", "name", "GET"
+                do_scan(args)
+            elif choice == "3":
+                args.url, args.param, args.method = "http://127.0.0.1:5000/safe", "name", "GET"
+                do_scan(args)
+            elif choice == "4":
+                run_step3_test()
+            else:
+                err("Please input a number from the menu (0-4).")
+                time.sleep(1)
+                continue
+        except ValueError:
+            err("Please input a number from the menu (0-4).")
+            time.sleep(1)
+            continue
+        except KeyboardInterrupt:
+            print(f"\n{C.WHT}[ {C.RED}! {C.WHT}] {C.RED}Exit{C.RST}")
+            return 0
+        # GhostTrack pattern: pause, then loop back to the menu.
+        input(f"\n{C.WHT}[ {C.GRN}+ {C.WHT}] {C.GRN}Press enter to continue{C.RST}")
+    return 0
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    try:
+        # Menu mode: --menu / -i, or no arguments at all (like GhostTrack,
+        # which has no args — it always opens its menu).
+        if args.menu or args.interactive or (not args.url and not args.param):
+            return menu_loop(args)
+        # Args given but something missing: ask only for the missing part.
+        print_banner()
+        if not args.url:
+            args.url = ask_interactive("ENTER TARGET URL", "http://127.0.0.1:5000/vuln")
+        if not args.param:
+            args.param = ask_interactive("ENTER PARAMETER NAME", "name")
+        return do_scan(args)
+    except KeyboardInterrupt:
+        print(f"\n{C.WHT}[ {C.RED}! {C.WHT}] {C.RED}Exit{C.RST}")
+        return 0
 
 
 if __name__ == "__main__":

@@ -143,6 +143,128 @@ lab-only, as the PDF requires.
 | Colours | On by default, `--disable-coloring` | None documented | None documented | Since v3.2, `--no-color` | Not documented | On by default, `--no-color` | ANSI green/white/red |
 | Report file | Output dir, session SQLite, JSON | `-oN/-oX/-oG/-oA` | `-o` text/json, restore file | `-o` plain text | `--log=scan.log` | `--save-vuln` (HTML/JSON planned) | TraceRecon: JSON+TXT in `output/` |
 
+## Code studied (read from the repos, 2026-11-25)
+
+### GhostTrack — `GhostTR.py` (full file read)
+```python
+Bl = '\033[30m'  # VARIABLE BUAT WARNA CUYY
+Re = '\033[1;31m'; Gr = '\033[1;32m'; Ye = '\033[1;33m'
+Blu = '\033[1;34m'; Mage = '\033[1;35m'; Cy = '\033[1;36m'; Wh = '\033[1;37m'
+
+def is_option(func):            # decorator: run banner before each function
+    def wrapper(*args, **kwargs):
+        run_banner()
+        func(*args, **kwargs)
+    return wrapper
+
+ip = input(f"{Wh}\n Enter IP target : {Gr}")   # label white, typed text green
+print(f' {Wh}============= {Gr}SHOW INFORMATION IP ADDRESS {Wh}=============')
+print(f"{Wh} Country       :{Gr}", ip_data["country"])   # label : value
+
+options = [{'num': 1, 'text': 'IP Tracker', 'func': IP_Track},
+           {'num': 2, 'text': 'Show Your IP', 'func': showIP},
+           {'num': 3, 'text': 'Phone Number Tracker', 'func': phoneGW},
+           {'num': 4, 'text': 'Username Tracker', 'func': TrackLu},
+           {'num': 0, 'text': 'Exit', 'func': exit}]
+def option_text():              # builds "[ 1 ] IP Tracker\n[ 2 ] ..."
+    text = ''
+    for opt in options:
+        text += f'{Wh}[ {opt["num"]} ] {Gr}{opt["text"]}\n'
+    return text
+def clear():
+    if os.name == 'nt': _ = os.system('cls')   # Windows
+    else: _ = os.system('clear')               # macOS / Linux
+def option(): clear(); stderr.writelines(f"""<big GHOST banner>
+{Wh}[ + ] C O D E B Y H U N X [ + ]"""); stderr.writelines(f"\n\n\n{option_text()}")
+def run_banner(): clear(); time.sleep(1); stderr.writelines(f"""<ghost art>
+: g g : {Wh}| {Gr}GHOST - TRACKER - IP ADDRESS {Wh}| ...""")
+def main():
+    clear(); option(); time.sleep(1)
+    opt = int(input(f"{Wh}\n [ + ] {Gr}Select Option : {Wh}"))
+    execute_option(opt)
+def execute_option(opt):
+    call_option(opt)
+    input(f'\n{Wh}[ {Gr}+ {Wh}] {Gr}Press enter to continue')
+    main()
+```
+
+### TraceRecon — `tracerecon.py` (first 430 lines read)
+```python
+class C:                        # colours as one class
+    RST = "\033[0m"; BLD = "\033[1m"; DIM = "\033[2m"
+    RED = "\033[1;31m"; GRN = "\033[1;32m"; YEL = "\033[1;33m"
+    BLU = "\033[1;34m"; MAG = "\033[1;35m"; CYN = "\033[1;36m"; WHT = "\033[1;37m"
+
+def clear(): os.system("cls" if os.name == "nt" else "clear")
+def sep(color=C.GRN, char="─", width=58): print(f"{color}{char * width}{C.RST}")
+def ok(msg):   print(f" {C.WHT}[{C.GRN}+{C.WHT}]{C.RST} {msg}")
+def warn(msg): print(f" {C.WHT}[{C.YEL}!{C.WHT}]{C.RST} {C.YEL}{msg}{C.RST}")
+def err(msg):  print(f" {C.WHT}[{C.RED}✗{C.WHT}]{C.RST} {C.RED}{msg}{C.RST}")
+def info(label, value, label_color=C.WHT, val_color=C.GRN):
+    print(f" {label_color}{label:<22}{C.RST}: {val_color}{value}{C.RST}")
+
+BANNER = """<block-art TRACE / RECON>
+┌──────────────────────────────────────────────────┐
+│ OSINT & Network Reconnaissance Toolkit v{VERSION} │
+│ For authorized research & educational use only   │
+└──────────────────────────────────────────────────┘"""
+
+MENU = [(1, "IP Address Tracker", "ip", C.GRN), (2, "My Public IP", "myip", C.CYN),
+        (3, "Phone Number OSINT", "phone", C.BLU), ... (0, "Exit", None, C.RED)]
+def show_menu():
+    clear(); stderr.write(BANNER); sep(C.GRN, "═")
+    bullet = f"{C.GRN}[{color}{num:>2}{C.GRN}]"
+    print(f" {bullet} {C.WHT}{label}{C.RST}")
+    sep(C.GRN, "═")
+
+raw = input(f"\n {C.WHT}Enter target IP{C.RST} (leave blank for auto-detect): {C.GRN}").strip()
+warn("Querying ipwho.is API …")
+export = input(f"\n {C.WHT}Export results? {C.GRN}[y/N]{C.RST}: ").strip().lower()
+# save_result(): timestamped JSON + TXT into output/
+def safe_get(url, **kwargs):    # Session + timeout + typed errors
+    try: resp = SESSION.get(url, timeout=TIMEOUT, **kwargs); resp.raise_for_status(); return resp
+    except requests.exceptions.Timeout: err("Request timed out.")
+    except requests.exceptions.ConnectionError: err("No network connection.")
+    except requests.exceptions.HTTPError as e: err(f"HTTP error: {e.response.status_code}")
+```
+
+### SSTImap — `utils/cliparser.py` (found by code search)
+```python
+msg += f"\n\033[94m[*]\033[0m Version: {version}"
+msg += f"\n\033[94m[*]\033[0m Author: @vladko312"      # OSC8 hyperlink to GitHub
+msg += f"\n\033[34m[*]\033[0m Based on Tplmap"
+msg += f"\n\033[91m[!] LEGAL DISCLAIMER\033[0m: Usage of SSTImap for attacking
+        targets without prior mutual consent is illegal. ..."
+```
+
+### sqlmap — `lib/core/settings.py` + `sqlmap.py` (found by code search)
+```python
+LEGAL_DISCLAIMER = "Usage of sqlmap for attacking targets without prior mutual
+consent is illegal. It is the end user's responsibility to obey all applicable
+local, state and federal laws. Developers assume no liability and are not
+responsible for any misuse or damage caused by this program"
+# sqlmap.py startup:
+dataToStdout("[!] legal disclaimer: %s\n\n" % LEGAL_DISCLAIMER, forceOutput=True)
+dataToStdout("[*] starting @ %s\n\n" % time.strftime("%X /%Y-%m-%d/"), forceOutput=True)
+```
+
+## What was applied to SSTIProbe v2.2 (within the PDF)
+1. Numbered menu (`--menu`, default with no args) — GhostTrack/TraceRecon
+   pattern: options list, `show_menu()`, `[ ? ] Select option : ` prompt,
+   `Press enter to continue` loop, Ctrl+C → `[ ! ] Exit`.
+2. Colour class `C` + helpers `ok()` / `warn()` / `err()` / `info()` /
+   `sep()` / `header()` / `clear()` — TraceRecon pattern (GhostTrack's
+   plain colour variables are the same idea).
+3. TraceRecon-style box under the banner; aligned `info()` fields for
+   the config block; `warn("Querying target …")` status line.
+4. Typed network errors in the scan (Timeout / ConnectionError /
+   RequestException) — TraceRecon `safe_get()` pattern.
+5. Step 3 test callable from the menu (option 4), reusing
+   `check_evaluation()` — the same 3 cases as `test_evaluation.py`.
+6. NOT copied: GhostTrack/TraceRecon's OSINT targets (IP/phone/username),
+   SSTImap's exploitation follow-ups, sqlmap's injection engine. SSTIProbe
+   stays detection-only, lab-only, as the PDF requires.
+
 ## What was applied to SSTIProbe v2.1 (within the PDF)
 1. Startup: banner → `[*] Version: 2.1` → `[*] Author: CyberBoy50` →
    `[!] LEGAL DISCLAIMER: lab only...` (SSTImap/sqlmap pattern).

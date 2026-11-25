@@ -37,23 +37,45 @@ LOCATIONCAT-style banner, colours, and interactive prompts:
 [?] ENTER REQUEST METHOD [GET/POST] [GET]:
 ```
 
-Run it with no arguments and it asks you (`python run.py probe`).
-Give `--url` and `--param` and it runs straight away with no prompts.
+Run it with no arguments and it opens the numbered menu, GhostTrack /
+TraceRecon style (`python run.py probe` or `--menu`):
+```
+ [ 1] Scan a target (enter URL, parameter, method)
+ [ 2] Quick scan: vulnerable lab  /vuln
+ [ 3] Quick scan: safe lab  /safe
+ [ 4] Run Step 3 test (evaluation check)
+ [ 0] Exit
+ [ ? ] Select option :
+```
+After each scan it asks `Press enter to continue` and returns to the menu.
+Option 1 asks the `[?]` questions (URL, parameter, method). Ctrl+C exits.
+Give `--url` and `--param` and it runs straight away with no menu or prompts.
 Every run shows the 6 must-have features as numbered steps:
 `[1] BASELINE`, `[2] DETECTION`, `[3] CONFIRM`, `[4] ENGINE`,
 `[5] REPORT SAVED TO`, plus the final `[!] VULNERABLE` / `[+] NOT VULNERABLE` verdict.
 
-Startup sequence (like SSTImap / sqlmap): banner → `[*] Version: 2.1` →
+Startup sequence (like SSTImap / sqlmap): banner → `[*] Version: 2.2` →
 `[*] Author: CyberBoy50` → `[!] LEGAL DISCLAIMER: Lab only...` →
-Gobuster-style `[+]` config block (Target, Parameter, Method, Output).
+TraceRecon-style box, then a Gobuster-style `[+]` config block
+(Target, Parameter, Method, Output) with aligned `info()` fields.
 
 Flags (see `python run.py probe --help`):
 ```
--i, --interactive   ask for URL, parameter and method (SSTImap style)
+--menu              show the numbered menu (default with no args)
+-i, --interactive   open the menu (SSTImap -i style)
 --version           print SSTIProbe version and exit
 --no-color          disable coloured output (sqlmap --disable-coloring style)
 --url / --param / --method / --json / --output / --timeout
 ```
+
+Interface code patterns (copied as ideas, not code — see
+`RESEARCH_CLI_TOOLS.md` for the originals): colour class `C` and helpers
+`ok()` / `warn()` / `err()` / `info()` / `sep()` / `header()` from
+TraceRecon; `clear()` (`cls` on Windows, `clear` elsewhere), menu list
+`{num, text, func}` and `Press enter to continue` loop from GhostTrack;
+version/author/disclaimer startup lines from SSTImap's `utils/cliparser.py`;
+`LEGAL_DISCLAIMER` constant printed at startup from sqlmap's
+`lib/core/settings.py`.
 
 ## Must-have features (PDF) — where each one lives
 
