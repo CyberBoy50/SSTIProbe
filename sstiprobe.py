@@ -58,13 +58,14 @@ USAGE — three ways, same tool:
 
 import argparse
 import os
+import random
 import sys
 import time
 from datetime import datetime
 
 import requests
 
-VERSION = "2.2"
+VERSION = "2.3"
 
 # --- Colours (ANSI: works on Kali/macOS/Windows 10+ terminals) ----------
 # colorama is used if installed (it fixes colours on older Windows cmd);
@@ -153,16 +154,86 @@ BANNER = r"""
 """
 
 # ---------------------------------------------------------------------------
-# STEP 4 — One payload table drives all 4 syntax families.
-# Each family carries a DIFFERENT multiplication, so we always know
-# which family produced a hit. (start, end) = the family's braces.
+# STEP 4 — Payload system, upgraded from tplmap / SSTImap (detection only).
+#
+# What the big tools do (see RESEARCH_CLI_TOOLS.md for the original code):
+#  * tplmap utils/rand.py: random ints, not fixed ones. randint_n(1) starts
+#    at 2 "to avoid number repetition on evaluation e.g. 1*8=8 creating
+#    false positives". randints = 3 random 2-digit ints, generated once
+#    per run and reused by every payload, with the expected result computed
+#    from the SAME randoms. tplmap Jinja2 test_render is
+#    '{{(n1,n2*n3)}}' with expected '(n1, n2*n3)'.
+#  * tplmap core/plugin.py _detect_render(): every payload is wrapped in a
+#    header + trailer made of a RANDOM 10-digit number, so the tool can
+#    check the exact string "header + result + trailer" — proof the number
+#    came from evaluation in that exact spot, not from elsewhere on the page.
+#  * tplmap set_contexts(): the input is not always in "text context".
+#    It may sit inside {{ }}, {% %}, a string, or a comment, so each engine
+#    lists contexts with a level (0 = text, 1 = code tag, 5 = if/for/comment)
+#    and a prefix/suffix that CLOSES the open tag first, e.g. Jinja2 level 1
+#    prefix '%(closure)s}}' covers {{%s}}, '%(closure)s%}' covers {% %s %}.
+#    --level picks how deep to test; _generate_contexts() skips levels above it.
+#  * tplmap _detect_blind() / plugins/languages/python.py 'blind' action:
+#    when nothing is reflected, send a TRUE expression and a FALSE one
+#    (test_bool_true "'a'.join('ab') == 'aab'", test_bool_false "True == False")
+#    and compare the two responses. Different answer = evaluated (blind).
+#  * Smarty test_render: '{r1}{*comment*}{r2}' expected 'r1r2' — the comment
+#    is stripped by the parser, proving the tag was parsed, not echoed.
+#  * SSTImap plugins/python/jinja2.py: test_render '{{(n1,n2*n3)|e}}',
+#    plus a 'render_error' technique that closes the expression differently.
+#
+# What SSTIProbe copies (all arithmetic-only, lab-only):
+#  1. Fixed 7*7-style first test per family (PDF example, demo-friendly).
+#  2. Random-pair confirm (tplmap rand pattern) as a THIRD check.
+#  3. Header/trailer wrapped confirm (tplmap render pattern).
+#  4. Contexts: text (level 0), inside {{ }} and {% %} (level 1),
+#     comment block (level 5). --level controls depth, default 1.
+#  5. Boolean blind check (tplmap blind pattern) when render finds nothing.
+#  6. One extra family per engine: ERB <%= %> and Smarty comment { }.
+# NOT copied: evaluate/execute/os-shell/RCE actions. Detection only.
 # ---------------------------------------------------------------------------
+
+def randint_n(n):
+    """Random n-digit int — tplmap utils/rand.py.
+    1-digit starts at 2 to avoid 1*8=8 false positives."""
+    range_start = 2 if n == 1 else 10 ** (n - 1)
+    return random.randint(range_start, (10 ** n) - 1)
+
+
+def random_pair():
+    """Two random 2-digit ints for a confirm multiplication."""
+    return randint_n(2), randint_n(2)
+
+
+# One entry per syntax family. Each carries a DIFFERENT multiplication, so
+# we always know which family produced a hit. "engine" is the likely engine
+# for that family (a guess until fingerprinting confirms it).
 PAYLOADS = [
-    # family,      start, end,  first test (a*b=result), confirm test
-    ("double-brace {{ }}", "{{", "}}", (7, 7, 49),  (7, 8, 56)),
-    ("dollar-brace ${ }",  "${", "}",  (8, 8, 64),  (8, 9, 72)),
-    ("hash-brace #{ }",    "#{", "}",  (9, 9, 81),  (9, 7, 63)),
-    ("star-brace *{ }",    "*{", "}",  (6, 7, 42),  (6, 8, 48)),
+    # family, engine guess, start, end, first test, confirm test
+    {"family": "double-brace {{ }}", "engine": "Jinja2 / Twig",
+     "start": "{{", "end": "}}", "test": (7, 7, 49), "confirm": (7, 8, 56)},
+    {"family": "dollar-brace ${ }", "engine": "Mako / FreeMarker",
+     "start": "${", "end": "}", "test": (8, 8, 64), "confirm": (8, 9, 72)},
+    {"family": "hash-brace #{ }", "engine": "Velocity / FreeMarker",
+     "start": "#{", "end": "}", "test": (9, 9, 81), "confirm": (9, 7, 63)},
+    {"family": "star-brace *{ }", "engine": "generic",
+     "start": "*{", "end": "}", "test": (6, 7, 42), "confirm": (6, 8, 48)},
+    {"family": "erb <%= %>", "engine": "ERB (Ruby)",
+     "start": "<%=", "end": "%>", "test": (5, 5, 25), "confirm": (5, 6, 30)},
+    # Smarty comment test (tplmap smarty.py): {11}{*x*}{22} -> "1122".
+    # The comment is stripped only if the tag was parsed.
+    {"family": "smarty comment { }", "engine": "Smarty (PHP)", "kind": "comment",
+     "test": (11, 22, "1122"), "confirm": (33, 44, "3344")},
+]
+
+# Contexts (tplmap set_contexts pattern). Level 0 = plain text context.
+# Level 1 = input sits inside an open tag: close it first, inject, reopen.
+# Level 5 = comment block: '#}' closes a comment, '{#' reopens it.
+CONTEXTS = [
+    {"level": 0, "name": "text context", "prefix": "", "suffix": ""},
+    {"level": 1, "name": "inside {{ }}", "prefix": "}}", "suffix": "{{"},
+    {"level": 1, "name": "inside {% %}", "prefix": "%}", "suffix": "{%"},
+    {"level": 5, "name": "comment block", "prefix": "#}", "suffix": "{#"},
 ]
 
 # STEP 5 — Engine fingerprint markers (detection only, still arithmetic).
@@ -171,9 +242,27 @@ PAYLOADS = [
 FINGERPRINT_MARKER = "7777777"
 
 
-def build_payload(start, end, a, b):
-    """Make one detection payload, e.g. {{7*7}} from ('{{','}}',7,7)."""
-    return f"{start}{a}*{b}{end}"
+def build_payload(fam, a, b):
+    """Make one detection payload for a family, e.g. {{7*7}}.
+    Smarty comment family: {11}{*x*}{22} from (11, 22)."""
+    if fam.get("kind") == "comment":
+        return f"{{{a}}}{{*x*}}{{{b}}}"
+    return f"{fam['start']}{a}*{b}{fam['end']}"
+
+
+def wrap_context(payload, ctx):
+    """Wrap a payload in a context's prefix/suffix (tplmap contexts)."""
+    return f"{ctx['prefix']}{payload}{ctx['suffix']}"
+
+
+def build_wrapped(fam, a, b):
+    """Header/trailer wrapped payload (tplmap _detect_render pattern).
+    Returns (payload, expected_string). The header/trailer are random
+    10-digit numbers, so the exact string proves evaluation in place."""
+    header, trailer = randint_n(10), randint_n(10)
+    start, end = fam["start"], fam["end"]
+    payload = f"{start}{header}{end}{start}{a}*{b}{end}{start}{trailer}{end}"
+    return payload, f"{header}{a * b}{trailer}"
 
 
 _BANNER_SHOWN = False
@@ -267,30 +356,72 @@ def fingerprint_engine(url, param, start, end, method, use_json, timeout=10):
 
 
 # ---------------------------------------------------------------------------
-# STEP 2 + 4 + 5 — Probe every family, confirm, fingerprint.
+# STEP 2 + 4 + 5 — Probe every family in every context, confirm, fingerprint.
+# tplmap detect(): render technique first ('R'), blind ('T') only if render
+# found nothing. _generate_contexts() skips contexts above --level.
 # ---------------------------------------------------------------------------
-def probe(url, param, baseline, method, use_json, timeout=10):
-    """Run all families. Returns a list of confirmed findings."""
-    findings = []
-    print(f"{CYAN}[2] DETECTION:{RESET} 4 syntax families, each with its own multiplication")
-    for family, start, end, (a, b, result), (c, d, confirm_result) in PAYLOADS:
-        payload = build_payload(start, end, a, b)
-        body = send_request(url, param, payload, method, use_json, timeout)
-        verdict = check_evaluation(baseline, body, payload, result)
-        if verdict == "evaluated":
-            colour, mark = RED, "[!]"
-        elif verdict == "reflected":
-            colour, mark = YELLOW, "[-]"
-        else:
-            colour, mark = "", "[ ]"
-        print(f"  {colour}{mark} [{family}] {payload} = {result} -> {verdict}{RESET}")
+def check_blind(url, param, baseline, method, use_json, timeout=10):
+    """Boolean blind check (tplmap _detect_blind pattern, arithmetic only).
+    Sends a TRUE expression and a FALSE one with NO braces — the input
+    lands in code context (lab /blind puts it in {% if ... %}).
+    Different responses for true vs false = the engine evaluated it.
+    Returns a finding dict, or None."""
+    true_expr, false_expr = "7*7==49", "7*7==50"
+    true_body = send_request(url, param, true_expr, method, use_json, timeout)
+    false_body = send_request(url, param, false_expr, method, use_json, timeout)
+    # Blind means EVALUATED but not printed: the expressions themselves
+    # must NOT appear in the responses. If they do, the app merely
+    # reflected different inputs — that is not blind evaluation
+    # (this is what made /safe look "blind" before the fix).
+    if (true_body != false_body and true_body != baseline
+            and true_expr not in true_body and false_expr not in false_body):
+        return {
+            "family": "boolean blind (no braces)",
+            "payload": true_expr,
+            "expected_result": "response differs for true vs false",
+            "confirm_payload": false_expr,
+            "confirm_result": "different response",
+            "engine": "Unknown template engine (blind — no output to fingerprint)",
+            "evidence": f"true -> {true_body[:120]!r} | false -> {false_body[:120]!r}",
+            "context": "code context (blind)",
+            "technique": "boolean blind",
+        }
+    return None
 
-        if verdict != "evaluated":
+
+def probe(url, param, baseline, method, use_json, timeout=10, level=1, technique="RT"):
+    """Run all families in all contexts up to --level. Returns findings."""
+    findings = []
+    print(f"{CYAN}[2] DETECTION:{RESET} {len(PAYLOADS)} syntax families, "
+          f"contexts up to level {level} (tplmap pattern)")
+    for fam in PAYLOADS:
+        family = fam["family"]
+        a, b, result = fam["test"]
+        c, d, confirm_result = fam["confirm"]
+        hit = None
+        # Context loop (tplmap _generate_contexts): text first, then code.
+        for ctx in CONTEXTS:
+            if ctx["level"] > level:
+                continue
+            payload = wrap_context(build_payload(fam, a, b), ctx)
+            body = send_request(url, param, payload, method, use_json, timeout)
+            verdict = check_evaluation(baseline, body, payload, result)
+            if verdict == "evaluated":
+                colour, mark = RED, "[!]"
+            elif verdict == "reflected":
+                colour, mark = YELLOW, "[-]"
+            else:
+                colour, mark = "", "[ ]"
+            print(f"  {colour}{mark} [{family}] [{ctx['name']}] {payload} = {result} -> {verdict}{RESET}")
+            if verdict == "evaluated":
+                hit = {"ctx": ctx, "payload": payload, "body": body}
+                break
+        if not hit:
             continue
 
         # Confirm with a SECOND, different multiplication (PDF Step 5/6).
         # One hit could be a coincidence; two different answers cannot be.
-        confirm_payload = build_payload(start, end, c, d)
+        confirm_payload = wrap_context(build_payload(fam, c, d), hit["ctx"])
         confirm_body = send_request(url, param, confirm_payload, method, use_json, timeout)
         confirm_verdict = check_evaluation(baseline, confirm_body, confirm_payload, confirm_result)
         print(f"      {CYAN}[3] CONFIRM:{RESET} {confirm_payload} = {confirm_result} -> {confirm_verdict}")
@@ -298,17 +429,55 @@ def probe(url, param, baseline, method, use_json, timeout=10):
             print("      Not confirmed — skipping (could be a false positive).")
             continue
 
-        engine = fingerprint_engine(url, param, start, end, method, use_json, timeout)
+        # [3a] Random-pair confirm (tplmap rand pattern): fresh random
+        # numbers every run, expected computed from the same randoms.
+        ra, rb = random_pair()
+        rand_payload = wrap_context(build_payload(fam, ra, rb), hit["ctx"])
+        rand_body = send_request(url, param, rand_payload, method, use_json, timeout)
+        rand_verdict = check_evaluation(baseline, rand_body, rand_payload, ra * rb)
+        print(f"      {CYAN}[3a] RANDOM CONFIRM:{RESET} {rand_payload} = {ra * rb} -> {rand_verdict}")
+        if rand_verdict != "evaluated":
+            print("      Random confirm failed — skipping (could be a false positive).")
+            continue
+
+        # [3b] Header/trailer wrapped confirm (tplmap _detect_render):
+        # random 10-digit markers around the result prove evaluation in place.
+        if fam.get("kind") != "comment":
+            wrapped_payload, wrapped_expected = build_wrapped(fam, a, b)
+            wrapped_payload = wrap_context(wrapped_payload, hit["ctx"])
+            wrapped_body = send_request(url, param, wrapped_payload, method, use_json, timeout)
+            wrapped_ok = wrapped_expected in wrapped_body and wrapped_expected not in baseline
+            print(f"      {CYAN}[3b] WRAPPED CONFIRM:{RESET} header+{a}*{b}+trailer -> "
+                  f"{'evaluated' if wrapped_ok else 'not confirmed'}")
+            if not wrapped_ok:
+                print("      Wrapped confirm failed — skipping (could be a false positive).")
+                continue
+
+        engine = fingerprint_engine(url, param, fam.get("start", ""), fam.get("end", ""), method, use_json, timeout)
+        if engine.startswith("Unknown"):
+            engine = f"Likely {fam['engine']} (family guess — fingerprint inconclusive)"
         print(f"      {CYAN}[4] ENGINE:{RESET} {engine}")
         findings.append({
             "family": family,
-            "payload": payload,
+            "payload": hit["payload"],
             "expected_result": result,
             "confirm_payload": confirm_payload,
             "confirm_result": confirm_result,
             "engine": engine,
-            "evidence": body[:300],
+            "evidence": hit["body"][:300],
+            "context": hit["ctx"]["name"],
+            "technique": "render",
         })
+
+    # Blind technique (tplmap 'T'): only if render found nothing.
+    if not findings and "T" in technique:
+        print(f"{CYAN}[2b] BLIND:{RESET} render found nothing — trying boolean blind (true vs false)")
+        blind = check_blind(url, param, baseline, method, use_json, timeout)
+        if blind:
+            print(f"  {RED}[!] [boolean blind] 7*7==49 vs 7*7==50 -> responses differ -> evaluated{RESET}")
+            findings.append(blind)
+        else:
+            print("  [ ] [boolean blind] responses identical — no blind evaluation")
     return findings
 
 
@@ -338,8 +507,8 @@ def build_report(url, param, method, findings):
         lines += [
             "Result: NOT VULNERABLE (no template evaluation detected)",
             "No payload was evaluated. This does not prove the app is",
-            "safe in every way — only that these 4 families did not",
-            "evaluate arithmetic in this parameter.",
+            "safe in every way — only that these 6 families did not",
+            "evaluate arithmetic in this parameter (render or blind).",
         ]
     else:
         lines.append(f"Result: VULNERABLE — {len(findings)} syntax family/families evaluated input")
@@ -348,6 +517,8 @@ def build_report(url, param, method, findings):
                 "",
                 f"Vulnerable parameter: {param}",
                 f"Syntax family: {f['family']}",
+                f"Context: {f.get('context', 'text context')}",
+                f"Technique: {f.get('technique', 'render')}",
                 f"Engine: {f['engine']}",
                 f"Detection payload: {f['payload']}  -> computed {f['expected_result']}",
                 f"Confirmation payload: {f['confirm_payload']}  -> computed {f['confirm_result']}",
@@ -386,6 +557,10 @@ def parse_args(argv=None):
                         help="Interactive mode: show the menu (like SSTImap -i)")
     parser.add_argument("--menu", action="store_true",
                         help="Show the numbered menu (GhostTrack / TraceRecon style)")
+    parser.add_argument("--level", type=int, default=1, choices=[0, 1, 5],
+                        help="Context depth, tplmap style: 0=text only, 1=+code tags (default), 5=+comment blocks")
+    parser.add_argument("--technique", default="RT", choices=["R", "T", "RT"],
+                        help="Technique, tplmap style: R=render, T=boolean blind, RT=both (default)")
     parser.add_argument("--no-color", action="store_true",
                         help="Disable coloured output (like sqlmap --disable-coloring)")
     parser.add_argument("--version", action="version",
@@ -458,12 +633,15 @@ def do_scan(args):
     info("Target", args.url)
     info("Parameter", args.param)
     info("Method", args.method)
+    info("Level", args.level)
+    info("Technique", args.technique)
     info("Output", args.output)
     sep()
     try:
         warn("Querying target …")
         baseline = fetch_baseline(args.url, args.param, args.method, args.json, args.timeout)
-        findings = probe(args.url, args.param, baseline, args.method, args.json, args.timeout)
+        findings = probe(args.url, args.param, baseline, args.method, args.json,
+                         args.timeout, level=args.level, technique=args.technique)
     except requests.exceptions.Timeout:
         err("Request timed out. Is the lab app running?  python run.py lab")
         return 1

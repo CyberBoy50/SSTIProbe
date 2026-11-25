@@ -143,6 +143,121 @@ lab-only, as the PDF requires.
 | Colours | On by default, `--disable-coloring` | None documented | None documented | Since v3.2, `--no-color` | Not documented | On by default, `--no-color` | ANSI green/white/red |
 | Report file | Output dir, session SQLite, JSON | `-oN/-oX/-oG/-oA` | `-o` text/json, restore file | `-o` plain text | `--log=scan.log` | `--save-vuln` (HTML/JSON planned) | TraceRecon: JSON+TXT in `output/` |
 
+## Payload system — what tplmap / SSTImap do (code read 2026-11-25)
+
+Only detection parts are quoted here. The `evaluate` / `execute` /
+`execute_blind` actions in these files are exploitation (RCE) — they
+were read to understand what NOT to copy; SSTIProbe has no equivalent.
+
+### tplmap `utils/rand.py`
+```python
+def randint_n(n):
+    # If the length is 1, starts from 2 to avoid
+    # number repetition on evaluation e.g. 1*8=8
+    # creating false positives
+    if n == 1: range_start = 2
+    else: range_start = 10**(n-1)
+    return random.randint(range_start, (10**n)-1)
+randints = [randint_n(2) for n in range(3)]      # 3 random 2-digit ints
+randstrings = [randstr_n(2) for n in range(3)]   # 3 random 2-char strings
+```
+
+### tplmap `plugins/engines/jinja2.py` (render + contexts)
+```python
+'render': '{{%(code)s}}', 'header': '{{%(header)s}}', 'trailer': '{{%(trailer)s}}'
+'test_render': '(%(n1)s,%(n2)s*%(n3)s)' % {'n1': rand.randints[0], ...}
+'test_render_expected': '%(res)s' % {'res': (rand.randints[0], rand.randints[1]*rand.randints[2])}
+self.set_contexts([
+    {'level': 0},                                            # text context
+    {'level': 1, 'prefix': '%(closure)s}}', ...},             # covers {{%s}}
+    {'level': 1, 'prefix': '%(closure)s%%}', ...},            # covers {% %s %}
+    {'level': 5, 'prefix': '%(closure)s\n', 'suffix': '\n', ...},  # if/for
+    {'level': 5, 'prefix': '#}', 'suffix': '{#'},            # comment blocks
+])
+```
+
+### tplmap `plugins/engines/smarty.py` and `mako.py`
+```python
+# Smarty: render is BARE code '%(code)s'; test uses a comment:
+'test_render': "{%(r1)s}{*%(comment)s*}{%(r2)s}"   # expected '%(r1)s%(r2)s'
+# Smarty contexts: level 1 prefix '%(closure)s}' suffix '{'; level 5
+# '%(closure)s}{/if}{if 1}', assign escape, comment '*}' / '{*'.
+# Mako: render '${%(code)s}'; contexts level 1 '%(closure)s}' and
+# '%(closure)s%%>' suffix '<%#' (code blocks <% %>); level 5 '#\n'.
+```
+
+### tplmap `plugins/engines/twig.py`
+```python
+# test_render is string-based, not arithmetic:
+'test_render': '"%(s1)s\n"|nl2br' % {'s1': rand.randstrings[0]}
+'test_render_expected': '%(res)s<br />' % {'res': rand.randstrings[0]}
+# Contexts: level 1 prefix '%(closure)s}}' suffix '{{1'; level 5
+# '%(closure)s %%}{%% endfor %%}{%% for a in [1] %%}'.
+```
+
+### tplmap `plugins/languages/python.py` — blind actions
+```python
+'blind': {'call': 'evaluate_blind',
+    'test_bool_true': "'a'.join('ab') == 'aab'",
+    'test_bool_false': 'True == False'}
+# (evaluate_blind itself uses eval + time.sleep — exploitation, NOT copied.)
+```
+
+### tplmap `core/plugin.py` — detection flow
+```python
+def detect(self):
+    techniques = self.channel.args.get('technique')
+    if 'R' in techniques: self._detect_render()     # render first
+    if 'T' in techniques and not self.get('engine'): self._detect_blind()
+def _detect_render(self):
+    for prefix, suffix in self._generate_contexts():   # respects --level
+        expected = render_action.get('test_render_expected')
+        payload = render_action.get('test_render')
+        trailer_rand = rand.randint_n(10)              # random 10-digit
+        trailer = render_action.get('trailer') % {'trailer': trailer_rand}
+        if expected == self.render(code=payload, trailer=trailer, prefix=prefix, suffix=suffix):
+            ... confirmed, channel.detected('render', ...)
+def _detect_blind(self):                               # true vs false
+    payload_true = action.get('test_bool_true'); payload_false = action.get('test_bool_false')
+    for prefix, suffix in self._generate_contexts():
+        if not inject(code=payload_true, blind=True): continue
+        if inject(code=payload_false, blind=True): continue
+        self.set('blind', True)   # true worked, false did not -> blind
+def _detect_unreliable_render(self):                   # fallback: substring
+    if expected in self.render(code=payload, trailer='', prefix='', suffix=''):
+        ... 'unreliable rendering' ...
+# render_req_tm = deque([0.5], maxlen=5) — average response time, used to
+# judge time-based blind delays.
+```
+
+### SSTImap `plugins/python/jinja2.py` (structure found by browser read)
+```python
+class Jinja2(python.Python): priority = 5
+'render': '{code}', 'header': '{{{{{header[0]}+{header[1]}}}}}'
+'test_render': f'{{{{({rand.randints[0]},{rand.randints[1]}*{rand.randints[2]})|e}}}}'
+'test_render_expected': f'{(rand.randints[0],rand.randints[1]*rand.randints[2])}'
+'render_error': {'render': '{code}', 'test_render': f'({rand...})|e', ...}
+# contexts: level 1 '{closure}}}}}' ({{ }}), '{closure}%}}' ({% %});
+# level 5 '{closure}\n', comment '#}}' / '{#'.
+# Repo layout: plugins/ by language (custom, generic, java, javascript,
+# languages, php, python, ruby); core/ has channel.py, checks.py,
+# plugin.py, matcher.py, interactive.py; utils/ has rand.py, closures.py.
+```
+
+## What was applied to SSTIProbe v2.3 (within the PDF)
+1. Random-pair confirm (`randint_n`, 1-digit starts at 2) — tplmap rand.
+2. Header/trailer wrapped confirm with random 10-digit markers.
+3. Contexts with `--level {0,1,5}` (text / code tags / comment blocks).
+4. Boolean blind technique `--technique {R,T,RT}` (true `7*7==49` vs
+   false `7*7==50`, no braces), with the reflection guard: the
+   expressions must NOT appear in the responses, else it is mere
+   reflection, not blind evaluation (this fixed a /safe false positive
+   found in testing).
+5. Two new families: ERB `<%= 5*5 %>` and Smarty comment `{11}{*x*}{22}`.
+6. Lab gained a `/blind` endpoint (`{% if <input> %}OK{% else %}FAIL`).
+7. NOT copied: evaluate/execute/os-shell/RCE, time-sleep blind, or
+   Twig's string `nl2br` test. SSTIProbe stays detection-only, lab-only.
+
 ## Code studied (read from the repos, 2026-11-25)
 
 ### GhostTrack — `GhostTR.py` (full file read)

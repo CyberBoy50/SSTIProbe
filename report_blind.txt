@@ -1,0 +1,18 @@
+SSTIProbe Report
+Date: 2026-11-25 15:45:46
+Target URL: http://127.0.0.1:5000/blind
+Parameter: name
+Method: GET
+
+Result: VULNERABLE — 1 syntax family/families evaluated input
+
+Vulnerable parameter: name
+Syntax family: boolean blind (no braces)
+Context: code context (blind)
+Technique: boolean blind
+Engine: Unknown template engine (blind — no output to fingerprint)
+Detection payload: 7*7==49  -> computed response differs for true vs false
+Confirmation payload: 7*7==50  -> computed different response
+Evidence (response snippet): "true -> 'OK' | false -> 'FAIL'"
+
+Remediation: Never render user input as a template. Pass it as a VARIABLE (e.g. render_template_string('Hello {{ name }}!', name=user_input)) so the engine prints it instead of evaluating it. If a template must be built from input, use a sandboxed engine and an allow-list of safe values.

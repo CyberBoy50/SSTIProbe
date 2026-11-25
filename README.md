@@ -51,8 +51,27 @@ After each scan it asks `Press enter to continue` and returns to the menu.
 Option 1 asks the `[?]` questions (URL, parameter, method). Ctrl+C exits.
 Give `--url` and `--param` and it runs straight away with no menu or prompts.
 Every run shows the 6 must-have features as numbered steps:
-`[1] BASELINE`, `[2] DETECTION`, `[3] CONFIRM`, `[4] ENGINE`,
-`[5] REPORT SAVED TO`, plus the final `[!] VULNERABLE` / `[+] NOT VULNERABLE` verdict.
+`[1] BASELINE`, `[2] DETECTION`, `[3] CONFIRM`, `[3a] RANDOM CONFIRM`,
+`[3b] WRAPPED CONFIRM`, `[4] ENGINE`, `[5] REPORT SAVED TO`, plus the
+final `[!] VULNERABLE` / `[+] NOT VULNERABLE` verdict.
+
+Payload system (tplmap / SSTImap patterns, detection-only):
+- 6 syntax families: `{{ }}` (Jinja2/Twig), `${ }` (Mako/FreeMarker),
+  `#{ }` (Velocity/FreeMarker), `*{ }`, `<%= %>` (ERB),
+  Smarty comment `{11}{*x*}{22}` → `1122` (comment stripped = parsed).
+- Contexts (tplmap `set_contexts`): text (level 0), inside `{{ }}` and
+  `{% %}` (level 1, close the tag first: `}}{{7*7}}{{`), comment block
+  (level 5). `--level {0,1,5}` controls depth, default 1.
+- Confirm in 3 ways: fixed second multiplication (`{{7*8}}` → 56),
+  random-pair confirm (fresh random 2-digit numbers every run, tplmap
+  `rand.py` pattern), header/trailer wrapped confirm (random 10-digit
+  markers around the result, tplmap `_detect_render` pattern).
+- Boolean blind technique (tplmap `_detect_blind`): if render finds
+  nothing, send `7*7==49` (true) vs `7*7==50` (false) with no braces;
+  different responses = evaluated. Lab endpoint `/blind` tests this.
+  `--technique {R,T,RT}` picks render / blind / both (default RT).
+- Engine fingerprint: `7*'7'` → `7777777` = Jinja2; otherwise the family
+  gives a "likely engine" guess. No exploitation payloads anywhere.
 
 Startup sequence (like SSTImap / sqlmap): banner → `[*] Version: 2.2` →
 `[*] Author: CyberBoy50` → `[!] LEGAL DISCLAIMER: Lab only...` →
@@ -63,10 +82,16 @@ Flags (see `python run.py probe --help`):
 ```
 --menu              show the numbered menu (default with no args)
 -i, --interactive   open the menu (SSTImap -i style)
+--level {0,1,5}     context depth (tplmap style, default 1)
+--technique {R,T,RT} render / boolean blind / both (default RT)
 --version           print SSTIProbe version and exit
 --no-color          disable coloured output (sqlmap --disable-coloring style)
 --url / --param / --method / --json / --output / --timeout
 ```
+
+Lab endpoints (`python run.py lab`, http://127.0.0.1:5000):
+`/vuln` (Jinja2 `{{ }}`), `/vuln-dollar` (`${ }`), `/safe` (fixed app),
+`/blind` (boolean blind — input inside `{% if ... %}`, nothing reflected).
 
 Interface code patterns (copied as ideas, not code — see
 `RESEARCH_CLI_TOOLS.md` for the originals): colour class `C` and helpers

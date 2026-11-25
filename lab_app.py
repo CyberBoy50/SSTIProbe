@@ -4,12 +4,15 @@ DO NOT run this on a public server, and NEVER point SSTIProbe at a
 real website you do not own.
 
 What this file is:
-  A tiny Flask app with 3 endpoints on http://127.0.0.1:5000
+  A tiny Flask app with 4 endpoints on http://127.0.0.1:5000
     /vuln         -> VULNERABLE, Jinja2, {{ }} syntax
     /vuln-dollar -> VULNERABLE, Jinja2 with ${ } delimiters
                     (stands in for a ${ } engine, e.g. Mako/FreeMarker style)
     /safe        -> SAFE, user input is passed as a variable, never
                     rendered as a template
+    /blind       -> BLIND: input lands inside {% if ... %} (code context),
+                    nothing is reflected — the tool must use boolean
+                    blind detection (true expression -> OK, false -> FAIL)
 
 Why two vulnerable endpoints?
   PDF Step 4 says: test against lab endpoints for TWO different
@@ -38,6 +41,7 @@ def home():
         "<li><a href='/vuln?name=Cyber'>/vuln?name=Cyber</a> — vulnerable, {{ }}</li>"
         "<li><a href='/vuln-dollar?name=Cyber'>/vuln-dollar?name=Cyber</a> — vulnerable, ${ }</li>"
         "<li><a href='/safe?name=Cyber'>/safe?name=Cyber</a> — safe</li>"
+        "<li><a href='/blind?name=1==1'>/blind?name=1==1</a> — blind (try 7*7==49 vs 7*7==50)</li>"
         "</ul>"
         "<p>Vulnerable test: replace Cyber with {{7*7}} — "
         "if you see 49, the template evaluated it.</p>"
@@ -59,6 +63,18 @@ def vuln_dollar():
     name = request.values.get("name", "Guest")
     template = dollar_env.from_string(f"Hello {name}!")
     return template.render()
+
+
+@app.route("/blind", methods=["GET", "POST"])
+def blind():
+    # BLIND ON PURPOSE (lab only): input lands inside {% if ... %},
+    # so it is EVALUATED but never printed. The only signal is the
+    # branch taken: true expression -> "OK", false -> "FAIL".
+    # SSTIProbe's boolean blind check sends 7*7==49 (true) and
+    # 7*7==50 (false) and compares the two responses.
+    # Baseline value "SSTIProbeBaseline" is an undefined name -> falsy -> FAIL.
+    name = request.values.get("name", "Guest")
+    return render_template_string(f"{{% if {name} %}}OK{{% else %}}FAIL{{% endif %}}")
 
 
 @app.route("/safe", methods=["GET", "POST"])
