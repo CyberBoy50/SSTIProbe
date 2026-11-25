@@ -10,7 +10,8 @@ WHAT IT DOES
   and checks whether the response contains the COMPUTED answer (49).
   If yes, it fingerprints the engine, confirms with a second
   multiplication, and saves a report. No exploitation payloads,
-  ever. Lab only — only test systems you own.
+  ever. Only test systems you own or have written permission to
+  test — your own website or lab.
 
 HOW DETECTION WORKS (the idea in one line)
   A template engine EVALUATES {{7*7}} to 49. A safe app just
@@ -86,7 +87,7 @@ except ImportError:  # noqa: BLE001 - requests simply is not installed
     requests = None  # type: ignore[assignment]
     HAVE_REQUESTS = False
 
-VERSION = "2.5"
+VERSION = "2.6"
 QUIET = False
 # Last HTTP status code seen by send_request (PDF Step 1: the baseline
 # printout must show status code AND body length).
@@ -174,7 +175,7 @@ BANNER = r"""
  |____/|____/  |_| |___|_|   |_| \_\\___/|_| \_\_____|
 
               by CyberBoy50
-        SSTI DETECTOR  |  LAB ONLY
+        SSTI DETECTOR  |  AUTHORIZED USE ONLY
  ==================================================
 """
 
@@ -207,7 +208,7 @@ BANNER = r"""
 #  * SSTImap plugins/python/jinja2.py: test_render '{{(n1,n2*n3)|e}}',
 #    plus a 'render_error' technique that closes the expression differently.
 #
-# What SSTIProbe copies (all arithmetic-only, lab-only):
+# What SSTIProbe copies (all arithmetic-only, authorized use only):
 #  1. Fixed 7*7-style first test per family (PDF example, demo-friendly).
 #  2. Random-pair confirm (tplmap rand pattern) as a THIRD check.
 #  3. Header/trailer wrapped confirm (tplmap render pattern).
@@ -314,14 +315,14 @@ def print_banner():
     print(f"[*] Version: {VERSION}")
     print("[*] Author: CyberBoy50")
     print(
-        "[!] LEGAL DISCLAIMER: Lab only — only test systems you own "
-        "or have written permission to test."
+        "[!] LEGAL DISCLAIMER: Only test systems you own or have "
+        "written permission to test — your own website or lab."
     )
     # TraceRecon-style box under the banner.
     print(f"{C.GRN}")
     print("┌──────────────────────────────────────────────────┐")
     print(f"│ SSTI Detector v{VERSION} — detection only        │")
-    print("│ For authorized lab use only                      │")
+    print("│ For authorized use only                          │")
     print("└──────────────────────────────────────────────────┘")
     print(f"{C.RST}", end="")
 

@@ -4,7 +4,8 @@
 **Course:** PNY Trainings, Cyber Security Department · **Deadline:** 25 November 2026
 
 A Python command-line tool that **detects** Server-Side Template Injection (SSTI)
-using harmless arithmetic only — never exploitation payloads. Lab only.
+using harmless arithmetic only — never exploitation payloads. Only test systems
+you own or have written permission to test — your own website or lab.
 
 ## How detection works
 
@@ -30,7 +31,7 @@ LOCATIONCAT-style banner, colours, and interactive prompts:
  / ___|/ ___||_   _|_ _|  _ \|  _ \ / _ \|  _ \| ____|
  ...
               by CyberBoy50
-        SSTI DETECTOR  |  LAB ONLY
+        SSTI DETECTOR  |  AUTHORIZED USE ONLY
 
 [?] ENTER TARGET URL [http://127.0.0.1:5000/vuln]:
 [?] ENTER PARAMETER NAME [name]:
@@ -103,8 +104,8 @@ Payload system (tplmap / SSTImap patterns, detection-only):
 - Engine fingerprint: `7*'7'` → `7777777` = Jinja2; otherwise the family
   gives a "likely engine" guess. No exploitation payloads anywhere.
 
-Startup sequence (like SSTImap / sqlmap): banner → `[*] Version: 2.2` →
-`[*] Author: CyberBoy50` → `[!] LEGAL DISCLAIMER: Lab only...` →
+Startup sequence (like SSTImap / sqlmap): banner → `[*] Version: 2.6` →
+`[*] Author: CyberBoy50` → `[!] LEGAL DISCLAIMER: Only test systems you own...` →
 TraceRecon-style box, then a Gobuster-style `[+]` config block
 (Target, Parameter, Method, Output) with aligned `info()` fields.
 

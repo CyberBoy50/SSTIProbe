@@ -2,12 +2,13 @@
 
 **Student:** Jahanzaib Yosuf — PNY Trainings, Web Security
 **Instructor:** Abdul Mannan — **Deadline:** Tuesday, 25 November 2026
-**Tool version in this demo:** v2.5 — **GitHub:** https://github.com/CyberBoy50/SSTIProbe
+**Tool version in this demo:** v2.6 — **GitHub:** https://github.com/CyberBoy50/SSTIProbe
 
 Everything below is a real run against the lab app on this machine
-(`python run.py lab`, http://127.0.0.1:5000). Lab only — never run this
-against a website you do not own. The random-confirm numbers change on
-every run; the fixed `{{7*7}}` → 49 result does not.
+(`python run.py lab`, http://127.0.0.1:5000). Only test systems you own
+or have written permission to test — your own website or lab. The
+random-confirm numbers change on every run; the fixed `{{7*7}}` → 49
+result does not.
 
 ## Setup
 
