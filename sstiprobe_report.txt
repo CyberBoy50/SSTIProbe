@@ -1,8 +1,11 @@
 SSTIProbe Report
-Date: 2026-11-25 20:12:39
+Date: 2026-11-25 19:24:13
 Target URL: http://127.0.0.1:5000/vuln
 Parameter: name
 Method: GET
+
+Disclaimer:
+DISCLAIMER — AUTHORIZED USE ONLY. This tool was built for ethical, authorized security testing only. You are using it on your own responsibility. The authors are not responsible for how you use it, or for anything that happens because of your use. Only test systems, code, and data you own or have explicit written permission to test — testing anything else may be illegal (for example, PECA 2016 in Pakistan).
 
 Result: VULNERABLE — 1 syntax family/families evaluated input
 

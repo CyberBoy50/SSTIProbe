@@ -108,7 +108,7 @@ Payload system (tplmap / SSTImap patterns, detection-only):
 - Engine fingerprint: `7*'7'` → `7777777` = Jinja2; otherwise the family
   gives a "likely engine" guess. No exploitation payloads anywhere.
 
-Startup sequence (like SSTImap / sqlmap): banner → `[*] Version: 2.6` →
+Startup sequence (like SSTImap / sqlmap): banner → `[*] Version: 2.9` →
 `[*] Author: CyberBoy50` → `[!] LEGAL DISCLAIMER: Only test systems you own...` →
 TraceRecon-style box, then a Gobuster-style `[+]` config block
 (Target, Parameter, Method, Output) with aligned `info()` fields.
@@ -298,3 +298,5 @@ Test **only** your own lab app (`127.0.0.1`). Never point this tool at a
 real website you do not own or have written permission to test.
 Unauthorised access is a criminal offence under PECA 2016 (Pakistan).
 Detection payloads only: arithmetic evaluation, nothing more.
+
+> DISCLAIMER — AUTHORIZED USE ONLY. This tool was built for ethical, authorized security testing only. You are using it on your own responsibility. The authors are not responsible for how you use it, or for anything that happens because of your use. Only test systems, code, and data you own or have explicit written permission to test — testing anything else may be illegal (for example, PECA 2016 in Pakistan).

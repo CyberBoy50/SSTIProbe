@@ -2,7 +2,7 @@
 
 **Student:** Jahanzaib Yosuf — PNY Trainings, Web Security
 **Instructor:** Abdul Mannan — **Deadline:** Tuesday, 25 November 2026
-**Tool version in this demo:** v2.8 — **GitHub:** https://github.com/CyberBoy50/SSTIProbe
+**Tool version in this demo:** v2.9 — **GitHub:** https://github.com/CyberBoy50/SSTIProbe
 
 Everything below is a real run against the lab app on this machine
 (`python run.py lab`, http://127.0.0.1:5000). Only test systems you own

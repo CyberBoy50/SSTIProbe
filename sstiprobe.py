@@ -71,6 +71,7 @@ import argparse
 import os
 import random
 import sys
+import textwrap
 import time
 from datetime import datetime
 from html.parser import HTMLParser
@@ -87,7 +88,19 @@ except ImportError:  # noqa: BLE001 - requests simply is not installed
     requests = None  # type: ignore[assignment]
     HAVE_REQUESTS = False
 
-VERSION = "2.8"
+VERSION = "2.9"
+
+# Explicit responsibility disclaimer — printed at startup (banner),
+# written into every generated report, and quoted in the README.
+# Wording is fixed: do not paraphrase it.
+DISCLAIMER = (
+    "DISCLAIMER — AUTHORIZED USE ONLY. This tool was built for ethical, "
+    "authorized security testing only. You are using it on your own "
+    "responsibility. The authors are not responsible for how you use it, "
+    "or for anything that happens because of your use. Only test systems, "
+    "code, and data you own or have explicit written permission to test — "
+    "testing anything else may be illegal (for example, PECA 2016 in Pakistan)."
+)
 QUIET = False
 # Last HTTP status code seen by send_request (PDF Step 1: the baseline
 # printout must show status code AND body length).
@@ -323,6 +336,9 @@ def print_banner():
     print("┌──────────────────────────────────────────────────┐")
     print(f"│ SSTI Detector v{VERSION} — detection only        │")
     print("│ For authorized use only                          │")
+    print("├──────────────────────────────────────────────────┤")
+    for line in textwrap.wrap(DISCLAIMER, width=46):
+        print(f"│ {line:<46} │")
     print("└──────────────────────────────────────────────────┘")
     print(f"{C.RST}", end="")
 
@@ -661,6 +677,9 @@ def build_report(url, param, method, findings):
         f"Target URL: {url}",
         f"Parameter: {param}",
         f"Method: {method}",
+        "",
+        "Disclaimer:",
+        DISCLAIMER,
         "",
     ]
     if not findings:
