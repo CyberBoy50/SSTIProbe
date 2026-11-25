@@ -1,5 +1,5 @@
 SSTIProbe Report
-Date: 2026-11-25 15:45:46
+Date: 2026-11-25 16:01:48
 Target URL: http://127.0.0.1:5000/safe
 Parameter: name
 Method: GET
@@ -8,3 +8,5 @@ Result: NOT VULNERABLE (no template evaluation detected)
 No payload was evaluated. This does not prove the app is
 safe in every way — only that these 6 families did not
 evaluate arithmetic in this parameter (render or blind).
+
+Remediation: Never render user input as a template. Pass it as a VARIABLE (e.g. render_template_string('Hello {{ name }}!', name=user_input)) so the engine prints it instead of evaluating it. If a template must be built from input, use a sandboxed engine and an allow-list of safe values.

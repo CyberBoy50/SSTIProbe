@@ -94,6 +94,12 @@ Payload system (tplmap / SSTImap patterns, detection-only):
   nothing, send `7*7==49` (true) vs `7*7==50` (false) with no braces;
   different responses = evaluated. Lab endpoint `/blind` tests this.
   `--technique {R,T,RT}` picks render / blind / both (default RT).
+- Timing blind (PDF stretch): if boolean blind also finds nothing,
+  compare response times — `range(3000000)|list` (~0.13s) vs baseline
+  (~0.004s). No sleep, no RCE, just a heavy harmless computation.
+- Form discovery (PDF stretch): `--discover <page-url>` fetches a lab
+  page, finds its `<form>` tags (stdlib `html.parser`) and probes every
+  input automatically. See `DEMO.md` for a real run.
 - Engine fingerprint: `7*'7'` → `7777777` = Jinja2; otherwise the family
   gives a "likely engine" guess. No exploitation payloads anywhere.
 
@@ -108,12 +114,17 @@ Flags (see `python run.py probe --help`):
 -i, --interactive   open the menu (SSTImap -i style)
 --level {0,1,5}     context depth (tplmap style, default 1)
 --technique {R,T,RT} render / boolean blind / both (default RT)
+--discover PAGE_URL fetch a lab page and probe every form input (PDF stretch)
 --batch             never ask, use defaults (sqlmap --batch style)
 -q, --quiet         only verdict + report path (Gobuster -q style)
 --version           print SSTIProbe version and exit
 --no-color          disable coloured output (sqlmap --disable-coloring style)
 --url / --param / --method / --json / --output / --timeout
 ```
+
+Demo and write-up: see `DEMO.md` — real runs on `/vuln`, `/safe`,
+`/blind` and `--discover`, the sample report, one finding explained,
+and the defensive lesson (never render user input as a template).
 
 Setup check:
 ```

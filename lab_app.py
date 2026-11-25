@@ -32,6 +32,17 @@ app = Flask(__name__)
 dollar_env = Environment(variable_start_string="${", variable_end_string="}")
 
 
+def get_name():
+    """Read the 'name' value from query, form body, OR a JSON body.
+    Without the JSON branch, --method POST --json probes would never
+    reach the template (Flask's request.values ignores JSON bodies)."""
+    name = request.values.get("name")
+    if name is None:
+        data = request.get_json(silent=True) or {}
+        name = data.get("name")
+    return name if name is not None else "Guest"
+
+
 @app.route("/")
 def home():
     return (
@@ -43,6 +54,13 @@ def home():
         "<li><a href='/safe?name=Cyber'>/safe?name=Cyber</a> — safe</li>"
         "<li><a href='/blind?name=1==1'>/blind?name=1==1</a> — blind (try 7*7==49 vs 7*7==50)</li>"
         "</ul>"
+        "<h2>Try the form (for --discover)</h2>"
+        "<form action='/vuln' method='get'>"
+        "Name: <input name='name' value='Cyber'>"
+        "<input type='submit' value='Say hello'>"
+        "</form>"
+        "<p>The form above posts to /vuln. SSTIProbe's --discover reads this "
+        "page, finds the form, and probes its <b>name</b> input by itself.</p>"
         "<p>Vulnerable test: replace Cyber with {{7*7}} — "
         "if you see 49, the template evaluated it.</p>"
     )
@@ -53,14 +71,14 @@ def vuln():
     # VULNERABLE ON PURPOSE (lab only):
     # user input is glued straight into the template string,
     # so Jinja2 evaluates it as code. {{7*7}} becomes 49.
-    name = request.values.get("name", "Guest")
+    name = get_name()
     return render_template_string(f"Hello {name}!")
 
 
 @app.route("/vuln-dollar", methods=["GET", "POST"])
 def vuln_dollar():
     # Same flaw, ${ } syntax family.
-    name = request.values.get("name", "Guest")
+    name = get_name()
     template = dollar_env.from_string(f"Hello {name}!")
     return template.render()
 
@@ -73,7 +91,7 @@ def blind():
     # SSTIProbe's boolean blind check sends 7*7==49 (true) and
     # 7*7==50 (false) and compares the two responses.
     # Baseline value "SSTIProbeBaseline" is an undefined name -> falsy -> FAIL.
-    name = request.values.get("name", "Guest")
+    name = get_name()
     return render_template_string(f"{{% if {name} %}}OK{{% else %}}FAIL{{% endif %}}")
 
 
@@ -82,7 +100,7 @@ def safe():
     # SAFE: input goes in as a VARIABLE, never as template code.
     # {{7*7}} is printed literally, never evaluated to 49.
     # This is the fix the report recommends.
-    name = request.values.get("name", "Guest")
+    name = get_name()
     return render_template_string("Hello {{ name }}!", name=name)
 
 

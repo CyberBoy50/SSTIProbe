@@ -1,5 +1,5 @@
 SSTIProbe Report
-Date: 2026-11-25 15:45:46
+Date: 2026-11-25 16:01:14
 Target URL: http://127.0.0.1:5000/vuln-dollar
 Parameter: name
 Method: GET

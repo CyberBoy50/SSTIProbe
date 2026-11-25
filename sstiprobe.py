@@ -72,6 +72,7 @@ import random
 import sys
 import time
 from datetime import datetime
+from html.parser import HTMLParser
 
 # Zero-dependency probe (sqlmap pattern: it works out of the box, no
 # install step, because it uses only the Python standard library).
@@ -85,8 +86,11 @@ except ImportError:  # noqa: BLE001 - requests simply is not installed
     requests = None  # type: ignore[assignment]
     HAVE_REQUESTS = False
 
-VERSION = "2.4"
+VERSION = "2.5"
 QUIET = False
+# Last HTTP status code seen by send_request (PDF Step 1: the baseline
+# printout must show status code AND body length).
+LAST_STATUS = None
 
 # --- Colours (ANSI: works on Kali/macOS/Windows 10+ terminals) ----------
 # colorama is used if installed (it fixes colours on older Windows cmd);
@@ -331,6 +335,7 @@ def send_request(url, param, value, method, use_json, timeout=10):
     """Send one request with `value` in `param`. Returns response text.
     With requests installed it uses requests; without it, plain urllib
     from the standard library — so the probe runs with zero installs."""
+    global LAST_STATUS
     if HAVE_REQUESTS:
         if method == "POST":
             if use_json:
@@ -339,6 +344,7 @@ def send_request(url, param, value, method, use_json, timeout=10):
                 resp = requests.post(url, data={param: value}, timeout=timeout)
         else:  # GET
             resp = requests.get(url, params={param: value}, timeout=timeout)
+        LAST_STATUS = resp.status_code
         return resp.text
     # --- urllib fallback (stdlib only) -------------------------------------
     import json as _json
@@ -361,8 +367,10 @@ def send_request(url, param, value, method, use_json, timeout=10):
             url + sep_char + urllib.parse.urlencode({param: value}))
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
+            LAST_STATUS = resp.status
             return resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:  # e.g. 500 template error page
+        LAST_STATUS = exc.code
         return exc.read().decode("utf-8", errors="replace")
 
 
@@ -377,11 +385,23 @@ def lab_is_running(timeout=3):
         return False
 
 
+def fetch_page(url, timeout=10):
+    """Plain GET of a page (form discovery). Returns the HTML text."""
+    if HAVE_REQUESTS:
+        resp = requests.get(url, timeout=timeout)
+        return resp.text
+    import urllib.request
+
+    with urllib.request.urlopen(url, timeout=timeout) as resp:
+        return resp.read().decode("utf-8", errors="replace")
+
+
 def fetch_baseline(url, param, method, use_json, timeout=10):
-    """Baseline = response to a harmless value ('SSTIProbeBaseline')."""
+    """Baseline = response to a harmless value ('SSTIProbeBaseline').
+    PDF Step 1: print status code AND body length."""
     body = send_request(url, param, "SSTIProbeBaseline", method, use_json, timeout)
     if not QUIET:
-        print(f"{CYAN}[1] BASELINE:{RESET} {len(body)} characters  ->  {body[:120]!r}")
+        print(f"{CYAN}[1] BASELINE:{RESET} HTTP {LAST_STATUS}, {len(body)} characters  ->  {body[:120]!r}")
     return body
 
 
@@ -447,6 +467,44 @@ def check_blind(url, param, baseline, method, use_json, timeout=10):
             "evidence": f"true -> {true_body[:120]!r} | false -> {false_body[:120]!r}",
             "context": "code context (blind)",
             "technique": "boolean blind",
+        }
+    return None
+
+
+def check_blind_timing(url, param, method, use_json, timeout=10):
+    """Timing blind check (PDF stretch: 'timing comparison for payloads
+    whose output never appears'). No sleep, no RCE — just a heavy but
+    harmless arithmetic/list computation: range(3000000)|list builds a
+    list of 3 million numbers (~0.13s locally vs ~0.004s baseline).
+    Median of 3 runs each; confirmed only if the payload is clearly
+    slower (more than 0.10s slower AND more than 5x the baseline)."""
+    import statistics
+
+    def median_time(value, runs=3):
+        times = []
+        for _ in range(runs):
+            start = time.monotonic()
+            send_request(url, param, value, method, use_json, timeout)
+            times.append(time.monotonic() - start)
+        return statistics.median(times)
+
+    base_time = median_time("SSTIProbeBaseline")
+    heavy_expr = "range(3000000)|list"
+    heavy_time = median_time(heavy_expr)
+    evidence = (f"baseline median {base_time:.3f}s, "
+                f"heavy payload median {heavy_time:.3f}s "
+                f"({heavy_time / max(base_time, 0.001):.1f}x slower)")
+    if heavy_time > base_time + 0.10 and heavy_time > 5 * base_time:
+        return {
+            "family": "timing blind (no braces)",
+            "payload": heavy_expr,
+            "expected_result": "response clearly slower than baseline",
+            "confirm_payload": heavy_expr,
+            "confirm_result": evidence,
+            "engine": "Unknown template engine (blind — no output to fingerprint)",
+            "evidence": evidence,
+            "context": "code context (blind)",
+            "technique": "timing blind",
         }
     return None
 
@@ -541,6 +599,7 @@ def probe(url, param, baseline, method, use_json, timeout=10, level=1, technique
         })
 
     # Blind technique (tplmap 'T'): only if render found nothing.
+    # Boolean first; timing comparison second (PDF stretch item).
     if not findings and "T" in technique:
         if not QUIET:
             print(f"{CYAN}[2b] BLIND:{RESET} render found nothing — trying boolean blind (true vs false)")
@@ -549,8 +608,16 @@ def probe(url, param, baseline, method, use_json, timeout=10, level=1, technique
             if not QUIET:
                 print(f"  {RED}[!] [boolean blind] 7*7==49 vs 7*7==50 -> responses differ -> evaluated{RESET}")
             findings.append(blind)
-        elif not QUIET:
-            print("  [ ] [boolean blind] responses identical — no blind evaluation")
+        else:
+            if not QUIET:
+                print("  [ ] [boolean blind] responses identical — trying timing blind")
+            timing = check_blind_timing(url, param, method, use_json, timeout)
+            if timing:
+                if not QUIET:
+                    print(f"  {RED}[!] [timing blind] {timing['evidence']} -> evaluated{RESET}")
+                findings.append(timing)
+            elif not QUIET:
+                print("  [ ] [timing blind] no clear timing difference — no blind evaluation")
     return findings
 
 
@@ -582,6 +649,11 @@ def build_report(url, param, method, findings):
             "No payload was evaluated. This does not prove the app is",
             "safe in every way — only that these 6 families did not",
             "evaluate arithmetic in this parameter (render or blind).",
+            "",
+            # The remediation note belongs in EVERY report (PDF Step 6:
+            # both the vulnerable and the safe report must be complete),
+            # so the defensive rule is recorded even when nothing was found.
+            f"Remediation: {REMEDIATION}",
         ]
     else:
         lines.append(f"Result: VULNERABLE — {len(findings)} syntax family/families evaluated input")
@@ -638,6 +710,9 @@ def parse_args(argv=None):
                         help="Never ask anything; use defaults (sqlmap --batch pattern)")
     parser.add_argument("-q", "--quiet", action="store_true",
                         help="Quiet mode: only the verdict + report path (Gobuster -q pattern)")
+    parser.add_argument("--discover", default=None, metavar="PAGE_URL",
+                        help="Form discovery (PDF stretch): fetch a lab page, find its "
+                             "forms, and probe every input automatically")
     parser.add_argument("--no-color", action="store_true",
                         help="Disable coloured output (like sqlmap --disable-coloring)")
     parser.add_argument("--version", action="version",
@@ -720,6 +795,28 @@ def run_step3_test():
     return 0
 
 
+def scan_one(args):
+    """Baseline + probe for one URL/parameter. Returns (findings, report).
+    Raises on network errors — the caller decides what to print."""
+    if not QUIET:
+        warn("Querying target …")
+    baseline = fetch_baseline(args.url, args.param, args.method, args.json, args.timeout)
+    findings = probe(args.url, args.param, baseline, args.method, args.json,
+                     args.timeout, level=args.level, technique=args.technique)
+    return findings, build_report(args.url, args.param, args.method, findings)
+
+
+def handle_scan_error(exc, url):
+    """Typed network-error messages (TraceRecon safe_get pattern)."""
+    if HAVE_REQUESTS and isinstance(exc, requests.exceptions.Timeout):
+        err("Request timed out. Is the lab app running?  python run.py lab")
+    elif HAVE_REQUESTS and isinstance(exc, requests.exceptions.ConnectionError):
+        err(f"Could not connect to {url}. Is the lab app running?  python run.py lab")
+    else:
+        err(f"Could not reach the lab app: {exc}")
+        print("Is lab_app.py running?  python run.py lab")
+
+
 def do_scan(args):
     """One full scan: config block, baseline, detection, report."""
     if not QUIET:
@@ -733,23 +830,11 @@ def do_scan(args):
         info("Output", args.output)
         sep()
     try:
-        if not QUIET:
-            warn("Querying target …")
-        baseline = fetch_baseline(args.url, args.param, args.method, args.json, args.timeout)
-        findings = probe(args.url, args.param, baseline, args.method, args.json,
-                         args.timeout, level=args.level, technique=args.technique)
-    except Exception as exc:  # noqa: BLE001 - typed below when requests exists
-        if HAVE_REQUESTS and isinstance(exc, requests.exceptions.Timeout):
-            err("Request timed out. Is the lab app running?  python run.py lab")
-            return 1
-        if HAVE_REQUESTS and isinstance(exc, requests.exceptions.ConnectionError):
-            err(f"Could not connect to {args.url}. Is the lab app running?  python run.py lab")
-            return 1
-        err(f"Could not reach the lab app: {exc}")
-        print("Is lab_app.py running?  python run.py lab")
+        findings, report = scan_one(args)
+    except Exception as exc:  # noqa: BLE001 - typed inside handle_scan_error
+        handle_scan_error(exc, args.url)
         return 1
 
-    report = build_report(args.url, args.param, args.method, findings)
     print()
     if findings:
         print(f"{RED}{BOLD}[!] VULNERABLE — template injection found in parameter '{args.param}'{RESET}")
@@ -762,6 +847,91 @@ def do_scan(args):
         fh.write(report)
     ok(f"REPORT SAVED TO: {args.output}")
     return 0
+
+
+# ---------------------------------------------------------------------------
+# STRETCH — Form discovery (PDF): read a lab page, find its forms, and
+# probe each input automatically. Standard library only (html.parser).
+# ---------------------------------------------------------------------------
+class FormParser(HTMLParser):
+    """Collect <form> tags with their action, method and input names."""
+
+    def __init__(self):
+        super().__init__()
+        self.forms = []
+        self._current = None
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "form":
+            self._current = {
+                "action": attrs.get("action", ""),
+                "method": attrs.get("method", "get").lower(),
+                "inputs": [],
+            }
+            self.forms.append(self._current)
+        elif tag in ("input", "textarea", "select") and self._current is not None:
+            name = attrs.get("name")
+            if name and attrs.get("type") != "submit":
+                self._current["inputs"].append(name)
+
+    def handle_endtag(self, tag):
+        if tag == "form":
+            self._current = None
+
+
+def discover_forms(page_url, timeout=10):
+    """Fetch a page and return its forms: [{action, method, inputs}]."""
+    parser = FormParser()
+    parser.feed(fetch_page(page_url, timeout))
+    return parser.forms
+
+
+def discover_and_scan(args):
+    """--discover: probe every input of every form on a page."""
+    import copy
+    from urllib.parse import urljoin
+
+    header("FORM DISCOVERY")
+    info("Page", args.discover)
+    try:
+        forms = discover_forms(args.discover, args.timeout)
+    except Exception as exc:  # noqa: BLE001 - page could not be fetched
+        handle_scan_error(exc, args.discover)
+        return 1
+    if not forms:
+        err(f"No forms found on {args.discover}")
+        return 1
+    ok(f"Found {len(forms)} form(s) on the page.")
+    all_findings = []
+    reports = []
+    for form in forms:
+        action_url = urljoin(args.discover, form["action"] or args.discover)
+        for input_name in form["inputs"]:
+            print()
+            info("Form action", action_url)
+            info("Input", input_name)
+            one = copy.copy(args)
+            one.url, one.param = action_url, input_name
+            one.method = form["method"].upper() if form["method"] in ("get", "post") else "GET"
+            try:
+                findings, report = scan_one(one)
+            except Exception as exc:  # noqa: BLE001 - one bad input must not stop the rest
+                handle_scan_error(exc, action_url)
+                continue
+            all_findings.extend(findings)
+            reports.append(report)
+            if findings:
+                print(f"{RED}{BOLD}[!] VULNERABLE — input '{input_name}'{RESET}")
+            else:
+                print(f"{GREEN}[+] NOT VULNERABLE — input '{input_name}'{RESET}")
+    combined = "\n".join(reports) if reports else "No inputs were probed.\n"
+    with open(args.output, "w", encoding="utf-8") as fh:
+        fh.write(combined)
+    print()
+    ok(f"DISCOVERY REPORT SAVED TO: {args.output} "
+       f"({len(all_findings)} vulnerable input(s) found)")
+    return 0 if all_findings else 0
 
 
 def menu_loop(args):
@@ -809,6 +979,10 @@ def menu_loop(args):
 def main(argv=None):
     args = parse_args(argv)
     try:
+        # --discover (PDF stretch): forms first, no menu, no prompts.
+        if args.discover:
+            print_banner()
+            return discover_and_scan(args)
         # --batch (sqlmap pattern): never ask, never show the menu —
         # missing values become the defaults and the scan runs straight away.
         # --quiet implies the same (a scripted run has nothing to ask).
