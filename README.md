@@ -43,6 +43,18 @@ Every run shows the 6 must-have features as numbered steps:
 `[1] BASELINE`, `[2] DETECTION`, `[3] CONFIRM`, `[4] ENGINE`,
 `[5] REPORT SAVED TO`, plus the final `[!] VULNERABLE` / `[+] NOT VULNERABLE` verdict.
 
+Startup sequence (like SSTImap / sqlmap): banner → `[*] Version: 2.1` →
+`[*] Author: CyberBoy50` → `[!] LEGAL DISCLAIMER: Lab only...` →
+Gobuster-style `[+]` config block (Target, Parameter, Method, Output).
+
+Flags (see `python run.py probe --help`):
+```
+-i, --interactive   ask for URL, parameter and method (SSTImap style)
+--version           print SSTIProbe version and exit
+--no-color          disable coloured output (sqlmap --disable-coloring style)
+--url / --param / --method / --json / --output / --timeout
+```
+
 ## Must-have features (PDF) — where each one lives
 
 | # | Feature | In the code |

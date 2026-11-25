@@ -33,6 +33,7 @@ THE 6 MUST-HAVE FEATURES (PDF) — all in this file:
 USAGE — two ways, same tool:
   Interactive (like LOCATIONCAT — it asks you):
     python run.py probe
+    python run.py probe -i        # explicit interactive mode (SSTImap style)
       [?] ENTER TARGET URL: http://127.0.0.1:5000/vuln
       [?] ENTER PARAMETER NAME: name
       [?] ENTER REQUEST METHOD [GET/POST]: GET
@@ -42,6 +43,8 @@ USAGE — two ways, same tool:
     python run.py probe --url http://127.0.0.1:5000/vuln --param name --method POST
     python run.py probe --url http://127.0.0.1:5000/vuln --param name --method POST --json
     python run.py probe --url http://127.0.0.1:5000/safe  --param name --output report.txt
+    python run.py probe --version
+    python run.py probe --url http://127.0.0.1:5000/vuln --param name --no-color
 """
 
 import argparse
@@ -49,6 +52,8 @@ import sys
 from datetime import datetime
 
 import requests
+
+VERSION = "2.1"
 
 # --- Colours (ANSI: works on Kali/macOS/Windows 10+ terminals) ----------
 # colorama is used if installed (it fixes colours on older Windows cmd);
@@ -106,13 +111,27 @@ def build_payload(start, end, a, b):
 _BANNER_SHOWN = False
 
 
+def disable_colours():
+    """Turn all colours off (--no-color, like sqlmap / SSTImap / Gobuster)."""
+    global RED, GREEN, YELLOW, CYAN, BOLD, RESET
+    RED = GREEN = YELLOW = CYAN = BOLD = RESET = ""
+
+
 def print_banner():
-    """LOCATIONCAT-style banner, printed once at the start."""
+    """Startup sequence (research consensus): banner, version, author,
+    legal disclaimer — like SSTImap / sqlmap."""
     global _BANNER_SHOWN
     if _BANNER_SHOWN:
         return
     _BANNER_SHOWN = True
     print(CYAN + BOLD + BANNER + RESET)
+    print(f"[*] Version: {VERSION}")
+    print("[*] Author: CyberBoy50")
+    print(
+        "[!] LEGAL DISCLAIMER: Lab only — only test systems you own "
+        "or have written permission to test."
+    )
+    print("=" * 50)
 
 
 # ---------------------------------------------------------------------------
@@ -287,18 +306,26 @@ def parse_args(argv=None):
     parser.add_argument("--output", default="sstiprobe_report.txt",
                         help="Report file to save (default: sstiprobe_report.txt)")
     parser.add_argument("--timeout", type=int, default=10, help="Request timeout in seconds")
+    parser.add_argument("-i", "--interactive", action="store_true",
+                        help="Interactive mode: ask for URL, parameter and method (like SSTImap -i)")
+    parser.add_argument("--no-color", action="store_true",
+                        help="Disable coloured output (like sqlmap --disable-coloring)")
+    parser.add_argument("--version", action="version",
+                        version=f"SSTIProbe {VERSION} by CyberBoy50")
     args = parser.parse_args(argv)
 
-    # Interactive mode: only when URL or parameter were NOT given as
-    # arguments. With --url + --param given, nothing is ever asked —
-    # the tool runs straight away (script / demo mode).
-    if not args.url or not args.param:
+    if args.no_color:
+        disable_colours()
+
+    # Interactive mode: with -i, or when URL / parameter were NOT given
+    # as arguments. With --url + --param given and no -i, nothing is
+    # ever asked — the tool runs straight away (script / demo mode).
+    # Args already given become the defaults shown in the prompts.
+    if args.interactive or not args.url or not args.param:
         print_banner()
-        if not args.url:
-            args.url = ask_interactive("ENTER TARGET URL", "http://127.0.0.1:5000/vuln")
-        if not args.param:
-            args.param = ask_interactive("ENTER PARAMETER NAME", "name")
-        method = ask_interactive("ENTER REQUEST METHOD [GET/POST]", "GET").upper()
+        args.url = ask_interactive("ENTER TARGET URL", args.url or "http://127.0.0.1:5000/vuln")
+        args.param = ask_interactive("ENTER PARAMETER NAME", args.param or "name")
+        method = ask_interactive("ENTER REQUEST METHOD [GET/POST]", args.method).upper()
         args.method = method if method in ("GET", "POST") else "GET"
     return args
 
@@ -307,9 +334,11 @@ def main(argv=None):
     args = parse_args(argv)
     # Banner was already shown in interactive mode; show it in args mode too.
     print_banner()
-    print(f"{BOLD}TARGET :{RESET} {args.url}")
-    print(f"{BOLD}PARAM  :{RESET} {args.param}")
-    print(f"{BOLD}METHOD :{RESET} {args.method}")
+    # Gobuster-style config block: the whole job at a glance.
+    print(f"{GREEN}[+] Target    :{RESET} {args.url}")
+    print(f"{GREEN}[+] Parameter :{RESET} {args.param}")
+    print(f"{GREEN}[+] Method    :{RESET} {args.method}")
+    print(f"{GREEN}[+] Output    :{RESET} {args.output}")
     print("-" * 50)
     try:
         baseline = fetch_baseline(args.url, args.param, args.method, args.json, args.timeout)
