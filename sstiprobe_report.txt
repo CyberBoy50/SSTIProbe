@@ -1,16 +1,12 @@
 SSTIProbe Report
-Date: 2026-11-25 15:39:30
-Target URL: http://127.0.0.1:5000/vuln-dollar
+Date: 2026-11-25 16:30:59
+Target URL: http://127.0.0.1:5000/safe
 Parameter: name
 Method: GET
 
-Result: VULNERABLE — 1 syntax family/families evaluated input
-
-Vulnerable parameter: name
-Syntax family: dollar-brace ${ }
-Engine: Jinja2 (Python string-repeat marker 7*'7' = 7777777)
-Detection payload: ${8*8}  -> computed 64
-Confirmation payload: ${8*9}  -> computed 72
-Evidence (response snippet): 'Hello 64!'
+Result: NOT VULNERABLE (no template evaluation detected)
+No payload was evaluated. This does not prove the app is
+safe in every way — only that these 6 families did not
+evaluate arithmetic in this parameter (render or blind).
 
 Remediation: Never render user input as a template. Pass it as a VARIABLE (e.g. render_template_string('Hello {{ name }}!', name=user_input)) so the engine prints it instead of evaluating it. If a template must be built from input, use a sandboxed engine and an allow-list of safe values.

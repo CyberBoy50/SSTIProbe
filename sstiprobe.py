@@ -43,10 +43,10 @@ USAGE — three ways, same tool:
     python run.py probe
     python run.py probe --menu
       [ 1] Scan a target (enter URL, parameter, method)
-      [ 2] Quick scan: vulnerable lab  /vuln
-      [ 3] Quick scan: safe lab  /safe
+      [ 2] Quick scan: /vuln (Enter = lab, or type your own URL)
+      [ 3] Quick scan: /safe (Enter = lab, or type your own URL)
       [ 4] Run Step 3 test (evaluation check)
-      [ 5] Check lab status (is the lab running?)
+      [ 5] Check a website / lab is reachable
       [ 0] Exit
       [ ? ] Select option :
 
@@ -87,7 +87,7 @@ except ImportError:  # noqa: BLE001 - requests simply is not installed
     requests = None  # type: ignore[assignment]
     HAVE_REQUESTS = False
 
-VERSION = "2.6"
+VERSION = "2.7"
 QUIET = False
 # Last HTTP status code seen by send_request (PDF Step 1: the baseline
 # printout must show status code AND body length).
@@ -377,13 +377,24 @@ def send_request(url, param, value, method, use_json, timeout=10):
 
 def lab_is_running(timeout=3):
     """Quick check: is the lab answering on 127.0.0.1:5000? (stdlib only)"""
+    ok, _code = site_status("http://127.0.0.1:5000/", timeout)
+    return ok
+
+
+def site_status(url, timeout=3):
+    """Is a website answering? Returns (reachable, http_status_or_None).
+    stdlib only — works for the lab and for any own website."""
     import urllib.request
 
     try:
-        with urllib.request.urlopen("http://127.0.0.1:5000/", timeout=timeout) as resp:
-            return resp.status == 200
-    except Exception:  # noqa: BLE001 - any failure means "not running"
-        return False
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            return True, resp.status
+    except Exception as exc:  # noqa: BLE001 - any failure means "not reachable"
+        import urllib.error
+
+        if isinstance(exc, urllib.error.HTTPError):
+            return True, exc.code  # answered, just with an error status
+        return False, None
 
 
 def fetch_page(url, timeout=10):
@@ -738,26 +749,42 @@ def parse_args(argv=None):
 # ---------------------------------------------------------------------------
 MENU_OPTIONS = [
     (1, "Scan a target (enter URL, parameter, method)", "scan"),
-    (2, "Quick scan: vulnerable lab  /vuln", "vuln"),
-    (3, "Quick scan: safe lab  /safe", "safe"),
+    (2, "Quick scan: /vuln (Enter = lab, or type your own URL)", "vuln"),
+    (3, "Quick scan: /safe (Enter = lab, or type your own URL)", "safe"),
     (4, "Run Step 3 test (evaluation check)", "test"),
-    (5, "Check lab status (is the lab running?)", "lab"),
+    (5, "Check a website / lab is reachable", "lab"),
     (0, "Exit", None),
 ]
 
 
 def lab_status():
-    """Menu option 5: is the lab answering? Tell the user how to start it."""
-    header("LAB STATUS")
-    if lab_is_running():
-        ok("Lab is running at http://127.0.0.1:5000")
-        info("Endpoints", "/vuln  /vuln-dollar  /safe  /blind")
+    """Menu option 5: is a website answering? Enter = check the lab,
+    or type any own website URL. Reports the HTTP status code."""
+    header("SITE STATUS")
+    url = ask_interactive("ENTER URL TO CHECK", "http://127.0.0.1:5000/")
+    reachable, code = site_status(url)
+    if reachable:
+        ok(f"Reachable: {url}  (HTTP {code})")
+        if url.rstrip("/") == "http://127.0.0.1:5000":
+            info("Endpoints", "/vuln  /vuln-dollar  /safe  /blind")
     else:
-        err("Lab is NOT running.")
-        print("  Start it in a SECOND terminal:")
-        print("    python run.py lab")
-        print("  Then come back here and pick option 1, 2 or 3.")
+        err(f"NOT reachable: {url}")
+        if url.rstrip("/") == "http://127.0.0.1:5000":
+            print("  Start the lab in a SECOND terminal:")
+            print("    python run.py lab")
+            print("  Then come back here and pick option 1, 2 or 3.")
+        else:
+            print("  Check the URL and your internet connection, then try again.")
     return 0
+
+
+def ask_scan_target(args, default_url):
+    """Options 2/3: ask URL, parameter, method — Enter on its own takes
+    the lab default, or type any own website URL instead."""
+    args.url = ask_interactive("ENTER TARGET URL", default_url)
+    args.param = ask_interactive("ENTER PARAMETER NAME", "name")
+    method = ask_interactive("ENTER REQUEST METHOD [GET/POST]", "GET").upper()
+    args.method = method if method in ("GET", "POST") else "GET"
 
 
 def show_menu():
@@ -952,10 +979,12 @@ def menu_loop(args):
                 args.method = method if method in ("GET", "POST") else "GET"
                 do_scan(args)
             elif choice == "2":
-                args.url, args.param, args.method = "http://127.0.0.1:5000/vuln", "name", "GET"
+                # Enter = lab /vuln; or type any own website URL.
+                ask_scan_target(args, "http://127.0.0.1:5000/vuln")
                 do_scan(args)
             elif choice == "3":
-                args.url, args.param, args.method = "http://127.0.0.1:5000/safe", "name", "GET"
+                # Enter = lab /safe; or type any own website URL.
+                ask_scan_target(args, "http://127.0.0.1:5000/safe")
                 do_scan(args)
             elif choice == "4":
                 run_step3_test()

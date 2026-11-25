@@ -66,14 +66,18 @@ Run it with no arguments and it opens the numbered menu, GhostTrack /
 TraceRecon style (`python run.py probe` or `--menu`):
 ```
  [ 1] Scan a target (enter URL, parameter, method)
- [ 2] Quick scan: vulnerable lab  /vuln
- [ 3] Quick scan: safe lab  /safe
+ [ 2] Quick scan: /vuln (Enter = lab, or type your own URL)
+ [ 3] Quick scan: /safe (Enter = lab, or type your own URL)
  [ 4] Run Step 3 test (evaluation check)
+ [ 5] Check a website / lab is reachable
  [ 0] Exit
  [ ? ] Select option :
 ```
 After each scan it asks `Press enter to continue` and returns to the menu.
-Option 1 asks the `[?]` questions (URL, parameter, method). Ctrl+C exits.
+Options 1, 2 and 3 all ask the `[?]` questions (URL, parameter, method) —
+on 2 and 3, pressing Enter takes the lab default (`/vuln` or `/safe`),
+or type any own website URL instead. Option 5 checks whether a website
+answers (Enter = the lab, or type your own URL). Ctrl+C exits.
 Give `--url` and `--param` and it runs straight away with no menu or prompts.
 Every run shows the 6 must-have features as numbered steps:
 `[1] BASELINE`, `[2] DETECTION`, `[3] CONFIRM`, `[3a] RANDOM CONFIRM`,
