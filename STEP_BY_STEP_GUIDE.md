@@ -179,7 +179,7 @@ evidence (`Hello 49!`), engine (Jinja2) — teeno sahi hain. ✅
 | Route | Kya hai |
 |---|---|
 | `/vuln` | **Vulnerable, jaan boojh kar.** `render_template_string(f"Hello {name}!")` — input template mein chipka diya, is liye evaluate hota hai. |
-| `/vuln-dollar` | Wahi flaw, `${ }` syntax mein. |
+| `/vuln-dollar` | Wahi flaw, `${ }` syntax mein — lekin asli **Mako** engine (v2.8 se). |
 | `/safe` | **Fix.** `render_template_string("Hello {{ name }}!", name=name)` — input VARIABLE ke tor par jata hai, template code nahi banta. |
 
 Yehi farq remediation note mein likha hai — aur yehi tumhari defensive lesson hai:

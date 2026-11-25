@@ -87,7 +87,7 @@ except ImportError:  # noqa: BLE001 - requests simply is not installed
     requests = None  # type: ignore[assignment]
     HAVE_REQUESTS = False
 
-VERSION = "2.7"
+VERSION = "2.8"
 QUIET = False
 # Last HTTP status code seen by send_request (PDF Step 1: the baseline
 # printout must show status code AND body length).
@@ -438,14 +438,22 @@ def check_evaluation(baseline, test_body, payload, expected_result):
 
 # ---------------------------------------------------------------------------
 # STEP 5 — Fingerprinting: only called AFTER evaluation is confirmed.
-# Sends 7*'7' in the same family's braces. Jinja2 gives 7777777.
+# Probes BOTH Python string-repeat markers: Jinja2/Twig evaluate
+# {{7*'7'}} and Mako evaluates ${7*'7'}. Whichever one returns
+# 7777777 names the engine — the two engines never agree, because
+# Jinja2 leaves ${...} untouched and Mako leaves {{...}} untouched.
 # ---------------------------------------------------------------------------
-def fingerprint_engine(url, param, start, end, method, use_json, timeout=10):
+def fingerprint_engine(url, param, method, use_json, timeout=10):
     """Return the engine name, or 'Unknown' if no marker matches."""
-    marker_payload = f"{start}7*'7'{end}"
-    body = send_request(url, param, marker_payload, method, use_json, timeout)
-    if FINGERPRINT_MARKER in body:
-        return "Jinja2 (Python string-repeat marker 7*'7' = 7777777)"
+    for start, end, name in (
+            ("{{", "}}",
+             "Jinja2 / Twig ({{ }} string-repeat marker 7*'7' = 7777777)"),
+            ("${", "}",
+             "Mako (Python string-repeat marker 7*'7' = 7777777)")):
+        body = send_request(url, param, f"{start}7*'7'{end}",
+                            method, use_json, timeout)
+        if FINGERPRINT_MARKER in body:
+            return name
     return "Unknown template engine"
 
 
@@ -593,7 +601,7 @@ def probe(url, param, baseline, method, use_json, timeout=10, level=1, technique
                     print("      Wrapped confirm failed — skipping (could be a false positive).")
                 continue
 
-        engine = fingerprint_engine(url, param, fam.get("start", ""), fam.get("end", ""), method, use_json, timeout)
+        engine = fingerprint_engine(url, param, method, use_json, timeout)
         if engine.startswith("Unknown"):
             engine = f"Likely {fam['engine']} (family guess — fingerprint inconclusive)"
         if not QUIET:

@@ -137,7 +137,7 @@ python run.py doctor     # Python version, venv, requests, flask, lab on :5000
 ```
 
 Lab endpoints (`python run.py lab`, http://127.0.0.1:5000):
-`/vuln` (Jinja2 `{{ }}`), `/vuln-dollar` (`${ }`), `/safe` (fixed app),
+`/vuln` (Jinja2 `{{ }}`), `/vuln-dollar` (Mako `${ }`, real engine), `/safe` (fixed app),
 `/blind` (boolean blind — input inside `{% if ... %}`, nothing reflected).
 
 Interface code patterns (copied as ideas, not code — see
@@ -251,7 +251,7 @@ Terminal 1 — start the lab app:
 python run.py lab          # Windows: python, macOS/Linux: python3
 # Lab runs at http://127.0.0.1:5000
 #   /vuln         vulnerable, {{ }}  (Jinja2)
-#   /vuln-dollar  vulnerable, ${ }  (Jinja2 with $ delimiters)
+#   /vuln-dollar  vulnerable, ${ }  (Mako, real engine)
 #   /safe         safe — input passed as a variable
 ```
 

@@ -5,9 +5,8 @@ real website you do not own.
 
 What this file is:
   A tiny Flask app with 4 endpoints on http://127.0.0.1:5000
-    /vuln         -> VULNERABLE, Jinja2, {{ }} syntax
-    /vuln-dollar -> VULNERABLE, Jinja2 with ${ } delimiters
-                    (stands in for a ${ } engine, e.g. Mako/FreeMarker style)
+    /vuln         -> VULNERABLE, Jinja2 (real engine), {{ }} syntax
+    /vuln-dollar -> VULNERABLE, Mako (real engine), ${ } syntax
     /safe        -> SAFE, user input is passed as a variable, never
                     rendered as a template
     /blind       -> BLIND: input lands inside {% if ... %} (code context),
@@ -16,20 +15,26 @@ What this file is:
 
 Why two vulnerable endpoints?
   PDF Step 4 says: test against lab endpoints for TWO different
-  engines — each must be detected by its own family.
+  engines — each must be detected by its own family. Since v2.8 both
+  are REAL engines: Jinja2 evaluates {{7*7}} and Mako evaluates
+  ${7*7}. (Twig / ERB / Smarty need PHP or Ruby runtimes, so they are
+  not in this Python lab — but SSTIProbe still detects all six syntax
+  families on any site it is pointed at.)
 
 Run (Windows, macOS, Linux — same command):
     python run.py lab
     # then open http://127.0.0.1:5000/ in your browser
 """
 from flask import Flask, request, render_template_string
-from jinja2 import Environment
+
+try:
+    from mako.template import Template
+except ImportError as exc:  # pragma: no cover
+    raise SystemExit(
+        "Mako is not installed — run: python run.py setup "
+        "(it installs Mako for the /vuln-dollar endpoint).") from exc
 
 app = Flask(__name__)
-
-# A second Jinja2 engine that uses ${ } instead of {{ }}.
-# Same idea, different syntax family — that is what Step 4 tests.
-dollar_env = Environment(variable_start_string="${", variable_end_string="}")
 
 
 def get_name():
@@ -49,8 +54,8 @@ def home():
         "<h1>SSTIProbe Lab (local only)</h1>"
         "<p>Try these in your browser:</p>"
         "<ul>"
-        "<li><a href='/vuln?name=Cyber'>/vuln?name=Cyber</a> — vulnerable, {{ }}</li>"
-        "<li><a href='/vuln-dollar?name=Cyber'>/vuln-dollar?name=Cyber</a> — vulnerable, ${ }</li>"
+        "<li><a href='/vuln?name=Cyber'>/vuln?name=Cyber</a> — vulnerable, Jinja2 {{ }}</li>"
+        "<li><a href='/vuln-dollar?name=Cyber'>/vuln-dollar?name=Cyber</a> — vulnerable, Mako ${ }</li>"
         "<li><a href='/safe?name=Cyber'>/safe?name=Cyber</a> — safe</li>"
         "<li><a href='/blind?name=1==1'>/blind?name=1==1</a> — blind (try 7*7==49 vs 7*7==50)</li>"
         "</ul>"
@@ -77,10 +82,12 @@ def vuln():
 
 @app.route("/vuln-dollar", methods=["GET", "POST"])
 def vuln_dollar():
-    # Same flaw, ${ } syntax family.
+    # VULNERABLE ON PURPOSE (lab only), REAL Mako engine:
+    # user input is glued straight into the Mako template string,
+    # so Mako evaluates it as code. ${7*7} becomes 49.
+    # (Mako leaves {{7*7}} untouched — it is not a Jinja2 template.)
     name = get_name()
-    template = dollar_env.from_string(f"Hello {name}!")
-    return template.render()
+    return Template(f"Hello {name}!").render()
 
 
 @app.route("/blind", methods=["GET", "POST"])
