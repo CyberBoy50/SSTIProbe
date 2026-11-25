@@ -16,11 +16,32 @@ HOW DETECTION WORKS (the idea in one line)
   A template engine EVALUATES {{7*7}} to 49. A safe app just
   PRINTS "{{7*7}}" back as text. So: 49 in the response = evaluated.
 
-USAGE
-  python sstiprobe.py --url http://127.0.0.1:5000/vuln --param name
-  python sstiprobe.py --url http://127.0.0.1:5000/vuln --param name --method POST
-  python sstiprobe.py --url http://127.0.0.1:5000/vuln --param name --method POST --json
-  python sstiprobe.py --url http://127.0.0.1:5000/safe  --param name --output report.txt
+THE 6 MUST-HAVE FEATURES (PDF) — all in this file:
+  1. CLI input for target URL, parameter name and request method
+     -> parse_args() + ask_interactive() below (args or [?] prompts)
+  2. Baseline request before any payload
+     -> fetch_baseline()
+  3. Detection payloads, 4 syntax families, distinct multiplication each
+     -> PAYLOADS table
+  4. Evaluation detection: computed result in response, not payload text
+     -> check_evaluation()
+  5. Engine fingerprinting with engine-specific markers
+     -> fingerprint_engine()
+  6. Report saved to a file: parameter, evidence, remediation note
+     -> build_report() + main() writes the file
+
+USAGE — two ways, same tool:
+  Interactive (like LOCATIONCAT — it asks you):
+    python run.py probe
+      [?] ENTER TARGET URL: http://127.0.0.1:5000/vuln
+      [?] ENTER PARAMETER NAME: name
+      [?] ENTER REQUEST METHOD [GET/POST]: GET
+
+  With arguments (for scripts / demo):
+    python run.py probe --url http://127.0.0.1:5000/vuln --param name
+    python run.py probe --url http://127.0.0.1:5000/vuln --param name --method POST
+    python run.py probe --url http://127.0.0.1:5000/vuln --param name --method POST --json
+    python run.py probe --url http://127.0.0.1:5000/safe  --param name --output report.txt
 """
 
 import argparse
@@ -28,6 +49,35 @@ import sys
 from datetime import datetime
 
 import requests
+
+# --- Colours (ANSI: works on Kali/macOS/Windows 10+ terminals) ----------
+# colorama is used if installed (it fixes colours on older Windows cmd);
+# without it the ANSI codes below still work on modern terminals.
+try:
+    import colorama
+
+    colorama.init()
+except Exception:  # noqa: BLE001 - colour is cosmetic, never fatal
+    pass
+
+RED = "\033[91m"
+GREEN = "\033[92m"
+YELLOW = "\033[93m"
+CYAN = "\033[96m"
+BOLD = "\033[1m"
+RESET = "\033[0m"
+
+BANNER = r"""
+  ____  ____  _____ ___ ____  ____   ___  ____  _____
+ / ___|/ ___||_   _|_ _|  _ \|  _ \ / _ \|  _ \| ____|
+ \___ \\___ \  | |  | || |_) | |_) | | | | |_) |  _|
+  ___) |___) | | |  | ||  __/|  _ <| |_| |  _ <| |___
+ |____/|____/  |_| |___|_|   |_| \_\\___/|_| \_\_____|
+
+              by CyberBoy50
+        SSTI DETECTOR  |  LAB ONLY
+ ==================================================
+"""
 
 # ---------------------------------------------------------------------------
 # STEP 4 — One payload table drives all 4 syntax families.
@@ -53,6 +103,18 @@ def build_payload(start, end, a, b):
     return f"{start}{a}*{b}{end}"
 
 
+_BANNER_SHOWN = False
+
+
+def print_banner():
+    """LOCATIONCAT-style banner, printed once at the start."""
+    global _BANNER_SHOWN
+    if _BANNER_SHOWN:
+        return
+    _BANNER_SHOWN = True
+    print(CYAN + BOLD + BANNER + RESET)
+
+
 # ---------------------------------------------------------------------------
 # STEP 1 — Fetch the baseline: the normal response, before any payload.
 # We need it so we can tell "the payload changed the page" apart from
@@ -73,8 +135,7 @@ def send_request(url, param, value, method, use_json, timeout=10):
 def fetch_baseline(url, param, method, use_json, timeout=10):
     """Baseline = response to a harmless value ('SSTIProbeBaseline')."""
     body = send_request(url, param, "SSTIProbeBaseline", method, use_json, timeout)
-    print(f"[Step 1] Baseline: {len(body)} characters")
-    print(f"          {body[:120]!r}")
+    print(f"{CYAN}[1] BASELINE:{RESET} {len(body)} characters  ->  {body[:120]!r}")
     return body
 
 
@@ -116,11 +177,18 @@ def fingerprint_engine(url, param, start, end, method, use_json, timeout=10):
 def probe(url, param, baseline, method, use_json, timeout=10):
     """Run all families. Returns a list of confirmed findings."""
     findings = []
+    print(f"{CYAN}[2] DETECTION:{RESET} 4 syntax families, each with its own multiplication")
     for family, start, end, (a, b, result), (c, d, confirm_result) in PAYLOADS:
         payload = build_payload(start, end, a, b)
         body = send_request(url, param, payload, method, use_json, timeout)
         verdict = check_evaluation(baseline, body, payload, result)
-        print(f"[{family}] payload {payload} -> {verdict}")
+        if verdict == "evaluated":
+            colour, mark = RED, "[!]"
+        elif verdict == "reflected":
+            colour, mark = YELLOW, "[-]"
+        else:
+            colour, mark = "", "[ ]"
+        print(f"  {colour}{mark} [{family}] {payload} = {result} -> {verdict}{RESET}")
 
         if verdict != "evaluated":
             continue
@@ -130,13 +198,13 @@ def probe(url, param, baseline, method, use_json, timeout=10):
         confirm_payload = build_payload(start, end, c, d)
         confirm_body = send_request(url, param, confirm_payload, method, use_json, timeout)
         confirm_verdict = check_evaluation(baseline, confirm_body, confirm_payload, confirm_result)
-        print(f"  Confirm: payload {confirm_payload} -> {confirm_verdict}")
+        print(f"      {CYAN}[3] CONFIRM:{RESET} {confirm_payload} = {confirm_result} -> {confirm_verdict}")
         if confirm_verdict != "evaluated":
-            print("  Not confirmed — skipping (could be a false positive).")
+            print("      Not confirmed — skipping (could be a false positive).")
             continue
 
         engine = fingerprint_engine(url, param, start, end, method, use_json, timeout)
-        print(f"  Engine fingerprinted: {engine}")
+        print(f"      {CYAN}[4] ENGINE:{RESET} {engine}")
         findings.append({
             "family": family,
             "payload": payload,
@@ -195,14 +263,23 @@ def build_report(url, param, method, findings):
 
 
 # ---------------------------------------------------------------------------
-# STEP 6 — CLI arguments (argparse).
+# FEATURE 1 — CLI input: arguments OR interactive [?] prompts.
+# If --url / --param are given, they are used as-is (script mode).
+# Anything missing is asked, LOCATIONCAT-style, with a sensible default.
 # ---------------------------------------------------------------------------
+def ask_interactive(prompt, default=""):
+    """Ask one [?] question; Enter on its own takes the default."""
+    shown = f"{default}" if default else ""
+    answer = input(f"{CYAN}[?]{RESET} {prompt} [{shown}]: ").strip()
+    return answer or default
+
+
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="SSTIProbe — detect Server-Side Template Injection (lab only, detection payloads only)."
     )
-    parser.add_argument("--url", required=True, help="Lab URL, e.g. http://127.0.0.1:5000/vuln")
-    parser.add_argument("--param", required=True, help="Parameter name to test, e.g. name")
+    parser.add_argument("--url", default=None, help="Lab URL, e.g. http://127.0.0.1:5000/vuln")
+    parser.add_argument("--param", default=None, help="Parameter name to test, e.g. name")
     parser.add_argument("--method", default="GET", choices=["GET", "POST"],
                         help="Request method (default: GET)")
     parser.add_argument("--json", action="store_true",
@@ -210,26 +287,49 @@ def parse_args(argv=None):
     parser.add_argument("--output", default="sstiprobe_report.txt",
                         help="Report file to save (default: sstiprobe_report.txt)")
     parser.add_argument("--timeout", type=int, default=10, help="Request timeout in seconds")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+
+    # Interactive mode: only when URL or parameter were NOT given as
+    # arguments. With --url + --param given, nothing is ever asked —
+    # the tool runs straight away (script / demo mode).
+    if not args.url or not args.param:
+        print_banner()
+        if not args.url:
+            args.url = ask_interactive("ENTER TARGET URL", "http://127.0.0.1:5000/vuln")
+        if not args.param:
+            args.param = ask_interactive("ENTER PARAMETER NAME", "name")
+        method = ask_interactive("ENTER REQUEST METHOD [GET/POST]", "GET").upper()
+        args.method = method if method in ("GET", "POST") else "GET"
+    return args
 
 
 def main(argv=None):
     args = parse_args(argv)
-    print(f"SSTIProbe — testing {args.url}  param={args.param}  method={args.method}")
+    # Banner was already shown in interactive mode; show it in args mode too.
+    print_banner()
+    print(f"{BOLD}TARGET :{RESET} {args.url}")
+    print(f"{BOLD}PARAM  :{RESET} {args.param}")
+    print(f"{BOLD}METHOD :{RESET} {args.method}")
+    print("-" * 50)
     try:
         baseline = fetch_baseline(args.url, args.param, args.method, args.json, args.timeout)
         findings = probe(args.url, args.param, baseline, args.method, args.json, args.timeout)
     except requests.RequestException as exc:
-        print(f"ERROR: could not reach the lab app: {exc}")
+        print(f"{RED}[!] ERROR: could not reach the lab app: {exc}{RESET}")
         print("Is lab_app.py running?  python run.py lab")
         return 1
 
     report = build_report(args.url, args.param, args.method, findings)
-    print("\n" + report)
+    print()
+    if findings:
+        print(f"{RED}{BOLD}[!] VULNERABLE — template injection found in parameter '{args.param}'{RESET}")
+    else:
+        print(f"{GREEN}{BOLD}[+] NOT VULNERABLE — no template evaluation detected{RESET}")
+    print(report)
     with open(args.output, "w", encoding="utf-8") as fh:
         fh.write(report)
-    print(f"Report saved to: {args.output}")
-    return 0 if not findings else 0  # exit 0 either way; the report is the result
+    print(f"{CYAN}[5] REPORT SAVED TO:{RESET} {args.output}")
+    return 0
 
 
 if __name__ == "__main__":

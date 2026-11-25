@@ -1,5 +1,5 @@
 SSTIProbe Report
-Date: 2026-11-25 14:08:01
+Date: 2026-11-25 14:49:48
 Target URL: http://127.0.0.1:5000/safe
 Parameter: name
 Method: GET

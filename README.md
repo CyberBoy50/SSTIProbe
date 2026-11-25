@@ -21,6 +21,39 @@ A finding is only reported after a **second, different** multiplication
 (e.g. `{{7*8}}` → `56`) also evaluates. Then the engine is fingerprinted
 with `7*'7'` → `7777777` (Jinja2 string-repeat marker).
 
+## Interface
+
+LOCATIONCAT-style banner, colours, and interactive prompts:
+
+```
+  ____  ____  _____ ___ ____  ____   ___  ____  _____
+ / ___|/ ___||_   _|_ _|  _ \|  _ \ / _ \|  _ \| ____|
+ ...
+              by CyberBoy50
+        SSTI DETECTOR  |  LAB ONLY
+
+[?] ENTER TARGET URL [http://127.0.0.1:5000/vuln]:
+[?] ENTER PARAMETER NAME [name]:
+[?] ENTER REQUEST METHOD [GET/POST] [GET]:
+```
+
+Run it with no arguments and it asks you (`python run.py probe`).
+Give `--url` and `--param` and it runs straight away with no prompts.
+Every run shows the 6 must-have features as numbered steps:
+`[1] BASELINE`, `[2] DETECTION`, `[3] CONFIRM`, `[4] ENGINE`,
+`[5] REPORT SAVED TO`, plus the final `[!] VULNERABLE` / `[+] NOT VULNERABLE` verdict.
+
+## Must-have features (PDF) — where each one lives
+
+| # | Feature | In the code |
+|---|---|---|
+| 1 | CLI input for target URL, parameter name, request method | `parse_args()` + `ask_interactive()` in `sstiprobe.py` |
+| 2 | Baseline request before any payload | `fetch_baseline()` |
+| 3 | Detection payloads, 4 syntax families, distinct multiplication each | `PAYLOADS` table (`{{7*7}}`=49, `${8*8}`=64, `#{9*9}`=81, `*{6*7}`=42) |
+| 4 | Evaluation detection: computed result in response, not payload text | `check_evaluation()` — `evaluated` / `reflected` / `no-change` |
+| 5 | Engine fingerprinting with engine-specific markers | `fingerprint_engine()` — `7*'7'` → `7777777` = Jinja2 |
+| 6 | Report saved to a file: parameter, evidence, remediation note | `build_report()` → `sstiprobe_report.txt` |
+
 ## Requirements
 
 - **Python 3.10+** — the only system requirement. Check with `python --version`
